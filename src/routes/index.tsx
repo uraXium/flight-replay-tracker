@@ -62,7 +62,7 @@ function Index() {
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<number, any>>(new Map());
-  const LRef = useRef<any>(null);
+  const didFitRef = useRef(false);
 
   // Init Leaflet
   useEffect(() => {
