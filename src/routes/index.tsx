@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import planeIconUrl from "@/assets/plane.svg";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -17,30 +18,33 @@ type Flight = {
   callsign: string;
   aircraft: string;
   livery: string;
-  started_at: number;
-  last_seen: number;
   dep_code: string | null;
-  dep_name: string | null;
   arr_code: string | null;
-  arr_name: string | null;
 };
 
 type LiveAircraft = {
   callsign: string;
   player: string;
-  serverId: string;
   x: number;
   y: number;
   heading: number;
   altitude: number;
   speed: number;
   aircraft: string;
-  livery: string;
   phase: string;
   flightId: number;
 };
 
 type LiveResponse = { polledAt: number; count: number; aircraft: LiveAircraft[] };
+
+// PFReplay's affine (from their bundle): world (x,y) -> (lat,lng)
+//   lat = -0.00072 * y - 67.5
+//   lng =  0.00072 * x + 120
+const A = { a: 0, b: -0.00072, c: -67.5, d: 0.00072, e: 0, f: 120 };
+const worldToLatLng = (x: number, y: number): [number, number] => [
+  A.a * x + A.b * y + A.c,
+  A.d * x + A.e * y + A.f,
+];
 
 function randomCid() {
   return Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
@@ -52,8 +56,44 @@ function Index() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [phaseFilter, setPhaseFilter] = useState<string>("All");
+  const [selected, setSelected] = useState<number | null>(null);
   const cid = useMemo(randomCid, []);
 
+  const mapEl = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const markersRef = useRef<Map<number, any>>(new Map());
+  const LRef = useRef<any>(null);
+
+  // Init Leaflet
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const L = (await import("leaflet")).default;
+      if (cancelled || !mapEl.current || mapRef.current) return;
+      LRef.current = L;
+      const map = L.map(mapEl.current, {
+        minZoom: 2,
+        maxZoom: 11,
+        zoomControl: true,
+        attributionControl: false,
+        worldCopyJump: false,
+      }).setView([-67.5, 120], 3);
+      L.tileLayer("https://pfreplay.com/api/tiles/{z}/{x}/{y}.webp?v=3", {
+        minZoom: 2,
+        maxZoom: 11,
+        maxNativeZoom: 8,
+        noWrap: true,
+      }).addTo(map);
+      mapRef.current = map;
+    })();
+    return () => {
+      cancelled = true;
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  // Poll pfreplay
   useEffect(() => {
     let alive = true;
     async function tick() {
@@ -77,6 +117,65 @@ function Index() {
       clearInterval(id);
     };
   }, [cid]);
+
+  // Sync markers
+  useEffect(() => {
+    const L = LRef.current;
+    const map = mapRef.current;
+    if (!L || !map || !live) return;
+
+    const seen = new Set<number>();
+    for (const a of live.aircraft) {
+      seen.add(a.flightId);
+      const latlng = worldToLatLng(a.x, a.y);
+      const phaseColor =
+        a.phase === "Cruise" ? "#facc15"
+        : a.phase === "Climbing" ? "#84cc16"
+        : a.phase === "Descending" ? "#fb923c"
+        : a.phase === "Airborne" ? "#facc15"
+        : a.phase === "On runway" ? "#f87171"
+        : "#94a3b8";
+      const html = `<div style="transform: rotate(${a.heading}deg); width:24px; height:24px;">
+        <img src="${planeIconUrl}" style="width:24px;height:24px;filter: drop-shadow(0 0 2px rgba(0,0,0,.8)) hue-rotate(0deg);" />
+      </div>`;
+      let m = markersRef.current.get(a.flightId);
+      if (!m) {
+        const icon = L.divIcon({
+          className: "pf-plane",
+          html,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+        m = L.marker(latlng, { icon, riseOnHover: true })
+          .addTo(map)
+          .on("click", () => setSelected(a.flightId));
+        markersRef.current.set(a.flightId, m);
+      } else {
+        m.setLatLng(latlng);
+        m.setIcon(
+          L.divIcon({
+            className: "pf-plane",
+            html: `<div style="transform: rotate(${a.heading}deg); width:24px; height:24px;">
+              <img src="${planeIconUrl}" style="width:24px;height:24px;filter: drop-shadow(0 0 2px rgba(0,0,0,.8));" />
+            </div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          }),
+        );
+      }
+      m.bindTooltip(
+        `<b>${a.callsign}</b><br>${a.aircraft}<br>${a.altitude.toLocaleString()} ft · ${a.speed} kt · ${a.phase}`,
+        { direction: "top", offset: [0, -10] },
+      );
+      void phaseColor;
+    }
+    for (const [id, m] of markersRef.current) {
+      if (!seen.has(id)) {
+        map.removeLayer(m);
+        markersRef.current.delete(id);
+      }
+    }
+  }, [live]);
 
   const liveById = useMemo(() => {
     const m = new Map<number, LiveAircraft>();
@@ -107,125 +206,104 @@ function Index() {
       });
   }, [flights, liveById, query, phaseFilter]);
 
-  const bounds = useMemo(() => {
-    if (!live?.aircraft.length) return { minX: -100000, maxX: 100000, minY: -100000, maxY: 100000 };
-    const xs = live.aircraft.map((a) => a.x);
-    const ys = live.aircraft.map((a) => a.y);
-    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
-  }, [live]);
+  const focus = (flightId: number) => {
+    const a = liveById.get(flightId);
+    if (!a || !mapRef.current) return;
+    mapRef.current.setView(worldToLatLng(a.x, a.y), 6, { animate: true });
+    setSelected(flightId);
+  };
+
+  const selectedAc = selected != null ? liveById.get(selected) : null;
+  const selectedFlight = selected != null ? flights.find((f) => f.id === selected) : null;
 
   return (
-    <div className="min-h-screen bg-[#05070d] text-slate-100">
-      <header className="border-b border-white/5 px-6 py-4 flex items-center justify-between">
+    <div className="h-screen w-screen bg-[#05070d] text-slate-100 flex flex-col">
+      <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">PFReplay Live Flights</h1>
-          <p className="text-xs text-slate-400">
-            Real-time data from pfreplay.com · polled every 3s
+          <h1 className="text-sm font-semibold tracking-tight">PFReplay Live · FR24-style</h1>
+          <p className="text-[10px] text-slate-400">
+            Tiles & data: pfreplay.com · polled every 3s
           </p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
           <span className="inline-flex items-center gap-2">
             <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
-            {live?.count ?? 0} aircraft live
+            {live?.count ?? 0} live
           </span>
-          <span>{flights.length} active flights</span>
+          <span>{flights.length} flights</span>
         </div>
       </header>
 
       {error && (
-        <div className="mx-6 mt-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+        <div className="mx-3 mt-2 rounded border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-300 flex-shrink-0">
           {error}
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-4 p-4">
-        <div className="rounded-lg border border-white/5 bg-[#0a0f1a] p-3">
-          <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">
-            Position map (PFReplay world coordinates)
-          </div>
-          <svg viewBox="0 0 800 500" className="w-full h-[520px]">
-            <rect width="800" height="500" fill="#070a13" />
-            {Array.from({ length: 9 }).map((_, i) => (
-              <line key={`v${i}`} x1={(i * 800) / 8} y1={0} x2={(i * 800) / 8} y2={500} stroke="#121a2b" />
-            ))}
-            {Array.from({ length: 6 }).map((_, i) => (
-              <line key={`h${i}`} x1={0} y1={(i * 500) / 5} x2={800} y2={(i * 500) / 5} stroke="#121a2b" />
-            ))}
-            {live?.aircraft.map((a) => {
-              const rangeX = Math.max(1, bounds.maxX - bounds.minX);
-              const rangeY = Math.max(1, bounds.maxY - bounds.minY);
-              const px = ((a.x - bounds.minX) / rangeX) * 780 + 10;
-              const py = 500 - (((a.y - bounds.minY) / rangeY) * 480 + 10);
-              const color =
-                a.phase === "Cruise"
-                  ? "#38bdf8"
-                  : a.phase === "Climbing"
-                    ? "#34d399"
-                    : a.phase === "Descending"
-                      ? "#fbbf24"
-                      : a.phase === "Taxiing"
-                        ? "#94a3b8"
-                        : "#a78bfa";
-              return (
-                <g key={a.flightId} transform={`translate(${px} ${py}) rotate(${a.heading})`}>
-                  <polygon points="0,-5 4,5 0,3 -4,5" fill={color} />
-                </g>
-              );
-            })}
-          </svg>
+      <div className="flex flex-1 min-h-0">
+        <div className="flex-1 relative">
+          <div ref={mapEl} className="absolute inset-0 bg-[#0a0f1a]" />
+          {selectedAc && selectedFlight && (
+            <div className="absolute top-2 right-2 z-[500] w-64 rounded-lg border border-white/10 bg-[#0a0f1a]/95 backdrop-blur p-3 text-xs shadow-xl">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="font-semibold text-sm">{selectedFlight.callsign}</div>
+                  <div className="text-slate-400">{selectedFlight.player}</div>
+                </div>
+                <button onClick={() => setSelected(null)} className="text-slate-500 hover:text-slate-200">✕</button>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-slate-300">
+                <div><div className="text-slate-500">Aircraft</div>{selectedAc.aircraft}</div>
+                <div><div className="text-slate-500">Phase</div>{selectedAc.phase}</div>
+                <div><div className="text-slate-500">Alt</div>{selectedAc.altitude.toLocaleString()} ft</div>
+                <div><div className="text-slate-500">Spd</div>{selectedAc.speed} kt</div>
+                <div><div className="text-slate-500">Hdg</div>{selectedAc.heading}°</div>
+                <div><div className="text-slate-500">Route</div>{selectedFlight.dep_code ?? "—"} → {selectedFlight.arr_code ?? "—"}</div>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="rounded-lg border border-white/5 bg-[#0a0f1a] p-3 flex flex-col min-h-[520px]">
-          <div className="flex gap-2 mb-3">
+        <aside className="w-[340px] border-l border-white/5 bg-[#0a0f1a] flex flex-col min-h-0">
+          <div className="p-2 flex gap-2 border-b border-white/5">
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search callsign, player, airport…"
-              className="flex-1 bg-[#070a13] border border-white/10 rounded px-2 py-1.5 text-sm placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
+              placeholder="Search…"
+              className="flex-1 bg-[#070a13] border border-white/10 rounded px-2 py-1 text-xs placeholder:text-slate-500 focus:outline-none focus:border-yellow-500"
             />
             <select
               value={phaseFilter}
               onChange={(e) => setPhaseFilter(e.target.value)}
-              className="bg-[#070a13] border border-white/10 rounded px-2 py-1.5 text-sm"
+              className="bg-[#070a13] border border-white/10 rounded px-1 py-1 text-xs"
             >
-              {phases.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
+              {phases.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
-          <div className="text-xs text-slate-400 mb-2">{rows.length} shown</div>
-          <div className="flex-1 overflow-auto -mx-3">
-            <table className="w-full text-xs">
-              <thead className="text-slate-400 sticky top-0 bg-[#0a0f1a]">
-                <tr className="text-left">
-                  <th className="px-3 py-2 font-medium">Callsign</th>
-                  <th className="px-3 py-2 font-medium">Aircraft</th>
-                  <th className="px-3 py-2 font-medium">Route</th>
-                  <th className="px-3 py-2 font-medium text-right">Alt</th>
-                  <th className="px-3 py-2 font-medium text-right">Spd</th>
-                  <th className="px-3 py-2 font-medium">Phase</th>
-                </tr>
-              </thead>
+          <div className="px-2 py-1 text-[10px] text-slate-500 border-b border-white/5">{rows.length} shown</div>
+          <div className="flex-1 overflow-auto">
+            <table className="w-full text-[11px]">
               <tbody>
                 {rows.map(({ flight, pos }) => (
-                  <tr key={flight.id} className="border-t border-white/5 hover:bg-white/5">
-                    <td className="px-3 py-1.5">
-                      <div className="font-medium">{flight.callsign}</div>
-                      <div className="text-slate-500">{flight.player}</div>
+                  <tr
+                    key={flight.id}
+                    onClick={() => focus(flight.id)}
+                    className={`border-b border-white/5 cursor-pointer hover:bg-white/5 ${selected === flight.id ? "bg-yellow-500/10" : ""}`}
+                  >
+                    <td className="px-2 py-1.5">
+                      <div className="font-medium text-slate-100">{flight.callsign}</div>
+                      <div className="text-slate-500">{flight.aircraft}</div>
                     </td>
-                    <td className="px-3 py-1.5 text-slate-300">{flight.aircraft}</td>
-                    <td className="px-3 py-1.5 text-slate-300">
-                      {flight.dep_code ?? "—"} → {flight.arr_code ?? "—"}
+                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">
+                      <div>{pos?.altitude.toLocaleString() ?? "—"}<span className="text-slate-500"> ft</span></div>
+                      <div className="text-slate-500">{pos?.phase ?? "—"}</div>
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{pos?.altitude.toLocaleString() ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{pos?.speed ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-slate-400">{pos?.phase ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </aside>
       </div>
     </div>
   );
