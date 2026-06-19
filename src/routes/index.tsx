@@ -78,7 +78,7 @@ function Index() {
         maxZoom: 11,
         zoomControl: true,
         attributionControl: false,
-      }).setView([-95, 112], 4);
+      }).setView([-56, 96], 3);
       L.tileLayer("https://pfreplay.com/api/tiles/{z}/{x}/{y}.webp?v=3", {
         tileSize: 256,
         minZoom: 2,
