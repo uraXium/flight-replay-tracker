@@ -89,6 +89,7 @@ function Index() {
         keepBuffer: 8,
       }).addTo(map);
       mapRef.current = map;
+      (window as any).__map = map;
     })();
     return () => {
       cancelled = true;
