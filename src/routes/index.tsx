@@ -176,6 +176,12 @@ function Index() {
         markersRef.current.delete(id);
       }
     }
+    if (!didFitRef.current && live.aircraft.length) {
+      const pts = live.aircraft.map((a) => worldToLatLng(a.x, a.y));
+      const bounds = L.latLngBounds(pts as any);
+      map.fitBounds(bounds.pad(0.2));
+      didFitRef.current = true;
+    }
   }, [live]);
 
   const liveById = useMemo(() => {
