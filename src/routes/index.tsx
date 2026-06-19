@@ -89,8 +89,6 @@ function Index() {
         keepBuffer: 8,
       }).addTo(map);
       mapRef.current = map;
-      (window as any).__map = map;
-      console.log("map ready", map.getZoom(), map.getCenter(), map.getSize());
     })();
     return () => {
       cancelled = true;
