@@ -73,17 +73,20 @@ function Index() {
       if (cancelled || !mapEl.current || mapRef.current) return;
       LRef.current = L;
       const map = L.map(mapEl.current, {
+        crs: L.CRS.Simple,
         minZoom: 2,
         maxZoom: 11,
         zoomControl: true,
         attributionControl: false,
-        worldCopyJump: false,
-      }).setView([-67.5, 120], 3);
+      }).setView([-95, 112], 4);
       L.tileLayer("https://pfreplay.com/api/tiles/{z}/{x}/{y}.webp?v=3", {
+        tileSize: 256,
         minZoom: 2,
         maxZoom: 11,
         maxNativeZoom: 8,
         noWrap: true,
+        bounds: L.latLngBounds([-112, 16], [0, 176]),
+        keepBuffer: 8,
       }).addTo(map);
       mapRef.current = map;
     })();
