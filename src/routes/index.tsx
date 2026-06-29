@@ -96,8 +96,10 @@ function Index() {
   const mapRef = useRef<any>(null);
   const LRef = useRef<any>(null);
   const tracks = useRef<Map<number, Track>>(new Map());
+  const history = useRef<Map<number, Array<{ x: number; y: number; alt: number }>>>(new Map());
   const lastPollAt = useRef<number>(0);
   const routeLayerRef = useRef<any>(null);
+  const [pollTick, setPollTick] = useState(0);
   const flightsByIdRef = useRef<Map<number, Flight>>(new Map());
   const airportsByCodeRef = useRef<Map<string, Airport>>(new Map());
   const selectedRef = useRef<number | null>(null);
