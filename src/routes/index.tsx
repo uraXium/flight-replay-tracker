@@ -174,9 +174,18 @@ function Index() {
           const seen = new Set<number>();
           for (const a of list.aircraft) {
             seen.add(a.flightId);
+            // append breadcrumb (dedupe near-identical points)
+            const hist = history.current.get(a.flightId) ?? [];
+            const last = hist[hist.length - 1];
+            if (!last || Math.hypot(last.x - a.x, last.y - a.y) > 80) {
+              hist.push({ x: a.x, y: a.y, alt: a.altitude });
+              if (hist.length > 600) hist.shift();
+              history.current.set(a.flightId, hist);
+            } else {
+              last.alt = a.altitude;
+            }
             const existing = tracks.current.get(a.flightId);
             if (existing) {
-              // Use current interpolated position as new "from"
               const k = existing.dur > 0 ? Math.min(1, (now - existing.t0) / existing.dur) : 1;
               existing.fromX = lerp(existing.fromX, existing.toX, k);
               existing.fromY = lerp(existing.fromY, existing.toY, k);
@@ -207,10 +216,12 @@ function Index() {
             if (!seen.has(id)) {
               map.removeLayer(t.marker);
               tracks.current.delete(id);
+              history.current.delete(id);
               if (selectedRef.current === id) setSelected(null);
             }
           }
         }
+        setPollTick((n) => n + 1);
 
         // collect phase list
         const ps = new Set<string>();
