@@ -278,7 +278,7 @@ function Index() {
     }
   }, [liveCount, selected]);
 
-  // Draw route line for selected flight (dep -> aircraft -> arr)
+  // Draw breadcrumb trail colored by flight level + dashed projection to arrival
   useEffect(() => {
     const L = LRef.current; const map = mapRef.current;
     if (!L || !map) return;
@@ -287,21 +287,48 @@ function Index() {
     const flight = flightsByIdRef.current.get(selected);
     const track = tracks.current.get(selected);
     if (!flight || !track) return;
+    const hist = history.current.get(selected) ?? [];
     const dep = flight.dep_code ? airportsByCodeRef.current.get(flight.dep_code) : null;
     const arr = flight.arr_code ? airportsByCodeRef.current.get(flight.arr_code) : null;
     const cur: [number, number] = worldToLatLng(track.toX, track.toY);
     const layer = L.layerGroup();
-    if (dep) {
-      L.polyline([worldToLatLng(dep.x, dep.y), cur], {
-        color: "#2ec27e", weight: 2, opacity: 0.85, dashArray: "4,4",
+
+    // altitude -> color (orange ground → yellow climb → green cruise)
+    const altColor = (alt: number) => {
+      if (alt < 1000) return "#ef4444";       // on/near ground
+      if (alt < 5000) return "#f59e2c";       // low climb/descent
+      if (alt < 15000) return "#ffd84d";      // mid
+      if (alt < 28000) return "#a3e635";      // upper climb
+      return "#2ec27e";                        // cruise FL280+
+    };
+
+    // breadcrumb segments, each colored by avg altitude of the two endpoints
+    const points: Array<{ x: number; y: number; alt: number }> = [];
+    if (dep) points.push({ x: dep.x, y: dep.y, alt: 0 });
+    for (const p of hist) points.push(p);
+    points.push({ x: track.toX, y: track.toY, alt: track.a.altitude });
+
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1], b = points[i];
+      const avgAlt = (a.alt + b.alt) / 2;
+      L.polyline([worldToLatLng(a.x, a.y), worldToLatLng(b.x, b.y)], {
+        color: altColor(avgAlt),
+        weight: 3,
+        opacity: 0.95,
+        lineCap: "round",
+        lineJoin: "round",
       }).addTo(layer);
+    }
+
+    if (dep) {
       L.circleMarker(worldToLatLng(dep.x, dep.y), {
         radius: 5, color: "#2ec27e", weight: 2, fillColor: "#0f172a", fillOpacity: 1,
       }).bindTooltip(`${dep.code} · ${dep.name}`, { direction: "top" }).addTo(layer);
     }
     if (arr) {
+      // dashed projected line current -> arrival
       L.polyline([cur, worldToLatLng(arr.x, arr.y)], {
-        color: "#ffd84d", weight: 2, opacity: 0.85, dashArray: "6,4",
+        color: "#ffd84d", weight: 2, opacity: 0.6, dashArray: "6,6",
       }).addTo(layer);
       L.circleMarker(worldToLatLng(arr.x, arr.y), {
         radius: 5, color: "#ffd84d", weight: 2, fillColor: "#0f172a", fillOpacity: 1,
@@ -309,7 +336,7 @@ function Index() {
     }
     layer.addTo(map);
     routeLayerRef.current = layer;
-  }, [selected, flights, airports]);
+  }, [selected, flights, airports, pollTick]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
