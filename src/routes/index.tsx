@@ -51,11 +51,11 @@ const worldToLatLng = (x: number, y: number): [number, number] => [
   0.00072 * x + 120,
 ];
 
-// FR24-style palette: yellow aircraft, cyan selected, amber/orange taxi, slate parked
+// FR24 palette: yellow aircraft airborne, orange taxi, slate parked
 const phaseStyle = (phase?: string) => {
   if (!phase) return { color: "#64748b", label: "parked", group: "park" as const };
   if (["Climbing", "Cruise", "Descending", "Airborne"].includes(phase))
-    return { color: "#f5a623", label: phase, group: "air" as const };
+    return { color: "#fbbf24", label: phase, group: "air" as const };
   if (["Taxiing", "On runway"].includes(phase))
     return { color: "#f97316", label: phase, group: "taxi" as const };
   return { color: "#64748b", label: phase, group: "park" as const };
