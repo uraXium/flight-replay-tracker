@@ -293,23 +293,25 @@ function Index() {
     const cur: [number, number] = worldToLatLng(track.toX, track.toY);
     const layer = L.layerGroup();
 
-    // altitude -> color (FR24-style trail: slate → yellow → amber → cyan → white)
+    // FR24 altitude palette: ground gray → green low → yellow mid → orange → red → magenta high
     const altColor = (alt: number) => {
-      if (alt < 1000) return "#94a3b8";       // on/near ground
-      if (alt < 5000) return "#f5a623";       // low climb/descent
-      if (alt < 15000) return "#fbbf24";      // mid
-      if (alt < 28000) return "#38bdf8";      // upper climb
-      return "#f8fafc";                        // cruise FL280+
+      if (alt < 500) return "#cbd5e1";        // ground
+      if (alt < 10000) return "#22c55e";      // green
+      if (alt < 20000) return "#eab308";      // yellow
+      if (alt < 30000) return "#f97316";      // orange
+      if (alt < 40000) return "#ef4444";      // red
+      return "#d946ef";                       // magenta (very high)
     };
 
-    // breadcrumb segments, each colored by avg altitude of the two endpoints
+    // breadcrumb segments — only real observed points (no synthetic dep jump)
     const points: Array<{ x: number; y: number; alt: number }> = [];
-    if (dep) points.push({ x: dep.x, y: dep.y, alt: 0 });
     for (const p of hist) points.push(p);
     points.push({ x: track.toX, y: track.toY, alt: track.a.altitude });
 
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1], b = points[i];
+      // skip absurd gaps (teleport / server change)
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 50000) continue;
       const avgAlt = (a.alt + b.alt) / 2;
       L.polyline([worldToLatLng(a.x, a.y), worldToLatLng(b.x, b.y)], {
         color: altColor(avgAlt),
