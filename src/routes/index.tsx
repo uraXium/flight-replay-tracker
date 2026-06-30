@@ -51,14 +51,14 @@ const worldToLatLng = (x: number, y: number): [number, number] => [
   0.00072 * x + 120,
 ];
 
-// matches pfreplay st-air/st-taxi/st-park
+// FR24-style palette: yellow aircraft, cyan selected, amber/orange taxi, slate parked
 const phaseStyle = (phase?: string) => {
-  if (!phase) return { color: "#6b7c8c", label: "parked", group: "park" as const };
+  if (!phase) return { color: "#64748b", label: "parked", group: "park" as const };
   if (["Climbing", "Cruise", "Descending", "Airborne"].includes(phase))
-    return { color: "#2ec27e", label: phase, group: "air" as const };
+    return { color: "#f5a623", label: phase, group: "air" as const };
   if (["Taxiing", "On runway"].includes(phase))
-    return { color: "#f59e2c", label: phase, group: "taxi" as const };
-  return { color: "#6b7c8c", label: phase, group: "park" as const };
+    return { color: "#f97316", label: phase, group: "taxi" as const };
+  return { color: "#64748b", label: phase, group: "park" as const };
 };
 
 // shortest-arc angle lerp
@@ -293,13 +293,13 @@ function Index() {
     const cur: [number, number] = worldToLatLng(track.toX, track.toY);
     const layer = L.layerGroup();
 
-    // altitude -> color (orange ground → yellow climb → green cruise)
+    // altitude -> color (FR24-style trail: slate → yellow → amber → cyan → white)
     const altColor = (alt: number) => {
-      if (alt < 1000) return "#ef4444";       // on/near ground
-      if (alt < 5000) return "#f59e2c";       // low climb/descent
-      if (alt < 15000) return "#ffd84d";      // mid
-      if (alt < 28000) return "#a3e635";      // upper climb
-      return "#2ec27e";                        // cruise FL280+
+      if (alt < 1000) return "#94a3b8";       // on/near ground
+      if (alt < 5000) return "#f5a623";       // low climb/descent
+      if (alt < 15000) return "#fbbf24";      // mid
+      if (alt < 28000) return "#38bdf8";      // upper climb
+      return "#f8fafc";                        // cruise FL280+
     };
 
     // breadcrumb segments, each colored by avg altitude of the two endpoints
@@ -322,16 +322,16 @@ function Index() {
 
     if (dep) {
       L.circleMarker(worldToLatLng(dep.x, dep.y), {
-        radius: 5, color: "#2ec27e", weight: 2, fillColor: "#0f172a", fillOpacity: 1,
+        radius: 5, color: "#f5a623", weight: 2, fillColor: "#0f172a", fillOpacity: 1,
       }).bindTooltip(`${dep.code} · ${dep.name}`, { direction: "top" }).addTo(layer);
     }
     if (arr) {
       // dashed projected line current -> arrival
       L.polyline([cur, worldToLatLng(arr.x, arr.y)], {
-        color: "#ffd84d", weight: 2, opacity: 0.6, dashArray: "6,6",
+        color: "#38bdf8", weight: 2, opacity: 0.6, dashArray: "6,6",
       }).addTo(layer);
       L.circleMarker(worldToLatLng(arr.x, arr.y), {
-        radius: 5, color: "#ffd84d", weight: 2, fillColor: "#0f172a", fillOpacity: 1,
+        radius: 5, color: "#38bdf8", weight: 2, fillColor: "#0f172a", fillOpacity: 1,
       }).bindTooltip(`${arr.code} · ${arr.name}`, { direction: "top" }).addTo(layer);
     }
     layer.addTo(map);
@@ -369,14 +369,14 @@ function Index() {
   const selectedAc = selectedAcSnap && selected === selectedAcSnap.flightId ? selectedAcSnap : null;
 
   return (
-    <div className="h-screen w-screen bg-[#05070d] text-slate-100 flex flex-col">
+    <div className="h-screen w-screen bg-[#0a0d14] text-slate-100 flex flex-col">
       <style>{`
         .pf-marker .pf-plane-wrap { width:22px; height:22px; transition: transform .25s linear; }
         .pf-marker img { transition: filter .2s; }
-        .pf-air img   { filter: drop-shadow(0 0 3px rgba(46,194,126,.9)) brightness(1.05) !important; }
-        .pf-taxi img  { filter: drop-shadow(0 0 3px rgba(245,158,44,.9)) hue-rotate(-25deg) !important; }
-        .pf-park img  { filter: drop-shadow(0 0 2px rgba(107,124,140,.8)) grayscale(.7) opacity(.7) !important; }
-        .pf-selected img { filter: drop-shadow(0 0 6px #ffd84d) brightness(1.2) !important; }
+        .pf-air img   { filter: drop-shadow(0 0 3px rgba(245,166,35,.85)) brightness(1.05) !important; }
+        .pf-taxi img  { filter: drop-shadow(0 0 3px rgba(249,115,22,.85)) hue-rotate(-25deg) !important; }
+        .pf-park img  { filter: drop-shadow(0 0 2px rgba(100,116,139,.8)) grayscale(.7) opacity(.7) !important; }
+        .pf-selected img { filter: drop-shadow(0 0 6px #38bdf8) brightness(1.2) !important; }
         .leaflet-tooltip { background:#0a0f1a; color:#f1f5f9; border:1px solid rgba(255,255,255,.15); font-size:11px; }
       `}</style>
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
@@ -385,11 +385,11 @@ function Index() {
           <p className="text-[10px] text-slate-400">Tiles & data: pfreplay.com · interpolated @ 60fps</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
-          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#2ec27e]" />Airborne</span>
-          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#f59e2c]" />Taxi</span>
-          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#6b7c8c]" />Parked</span>
+          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#f5a623]" />Airborne</span>
+          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#f97316]" />Taxi</span>
+          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#64748b]" />Parked</span>
           <span className="inline-flex items-center gap-2 ml-2">
-            <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="size-2 rounded-full bg-sky-400 animate-pulse" />
             {liveCount} live · {flights.length} flights
           </span>
         </div>
@@ -406,7 +406,7 @@ function Index() {
             <div className="absolute top-2 right-2 z-[500] w-72 rounded-lg border border-white/10 bg-[#0a0f1a]/95 backdrop-blur p-3 text-xs shadow-xl">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold text-sm">{selectedFlight.callsign}</div>
+                  <div className="font-semibold text-sm text-sky-300">{selectedFlight.callsign}</div>
                   <div className="text-slate-400">{selectedFlight.player}</div>
                 </div>
                 <button onClick={() => setSelected(null)} className="text-slate-500 hover:text-slate-200">✕</button>
@@ -425,12 +425,12 @@ function Index() {
                 <div className="text-slate-500 mb-1">Route</div>
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="font-mono text-[#2ec27e]">{selectedFlight.dep_code ?? "—"}</div>
+                    <div className="font-mono text-[#f5a623]">{selectedFlight.dep_code ?? "—"}</div>
                     <div className="text-slate-400 text-[10px] truncate">{selectedFlight.dep_name ?? "Unknown departure"}</div>
                   </div>
                   <div className="text-slate-500">→</div>
                   <div className="min-w-0 text-right">
-                    <div className="font-mono text-[#ffd84d]">{selectedFlight.arr_code ?? "—"}</div>
+                    <div className="font-mono text-[#38bdf8]">{selectedFlight.arr_code ?? "—"}</div>
                     <div className="text-slate-400 text-[10px] truncate">{selectedFlight.arr_name ?? "No destination set"}</div>
                   </div>
                 </div>
