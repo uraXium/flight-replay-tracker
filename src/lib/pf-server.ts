@@ -20,9 +20,8 @@ export const fetchTraffic = createServerFn({ method: "GET" }).handler(async (): 
   return decodeMultiPlanes(buf);
 });
 
-export const fetchUserTrail = createServerFn({ method: "GET" })
+export const fetchUserTrail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => {
-    if (typeof d === "string") return { username: d };
     const o = d as { username?: unknown };
     if (!o || typeof o.username !== "string") throw new Error("username required");
     return { username: o.username };
@@ -31,3 +30,4 @@ export const fetchUserTrail = createServerFn({ method: "GET" })
     const buf = await pf(`/v3/traffic/fetch/${encodeURIComponent(data.username)}`);
     return decodeUserPlane(buf);
   });
+
