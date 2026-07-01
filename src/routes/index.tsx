@@ -1,109 +1,74 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import planeIconUrl from "@/assets/plane.svg";
+import { fetchTraffic, fetchUserTrail } from "@/lib/pf-server";
+import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "PFReplay Live Flights" },
-      { name: "description", content: "Real-time flight tracker pulling live aircraft positions from pfreplay.com." },
+      { title: "Project-Flight Live Tracker" },
+      { name: "description", content: "Live PTFS traffic from tracker.project-flight.com — real trails from official API." },
     ],
   }),
   component: Index,
 });
 
-type Flight = {
-  id: number;
-  player: string;
-  callsign: string;
-  aircraft: string;
-  livery: string;
-  started_at: number;
-  last_seen: number;
-  dep_code: string | null;
-  dep_name: string | null;
-  arr_code: string | null;
-  arr_name: string | null;
-};
-
-type LiveAircraft = {
-  callsign: string;
-  player: string;
-  serverId: string;
-  x: number;
-  y: number;
-  heading: number;
-  altitude: number;
-  speed: number;
-  aircraft: string;
-  livery: string;
-  phase: string;
-  flightId: number;
-};
-
-type LiveResponse = { polledAt: number; count: number; aircraft: LiveAircraft[] };
-
-type Airport = { code: string; name: string; x: number; y: number; iata?: string };
-
-// PFReplay affine: lat = -0.00072*y - 67.5, lng = 0.00072*x + 120
+// pfreplay tile affine (same coord system as PF): lat = -0.00072*y - 67.5, lng = 0.00072*x + 120
 const worldToLatLng = (x: number, y: number): [number, number] => [
   -0.00072 * y - 67.5,
   0.00072 * x + 120,
 ];
 
-// FR24 palette: yellow aircraft airborne, orange taxi, slate parked
-const phaseStyle = (phase?: string) => {
-  if (!phase) return { color: "#64748b", label: "parked", group: "park" as const };
-  if (["Climbing", "Cruise", "Descending", "Airborne"].includes(phase))
-    return { color: "#fbbf24", label: phase, group: "air" as const };
-  if (["Taxiing", "On runway"].includes(phase))
-    return { color: "#f97316", label: phase, group: "taxi" as const };
-  return { color: "#64748b", label: phase, group: "park" as const };
+type Phase = "air" | "taxi" | "park";
+const derivePhase = (alt: number, spd: number): Phase => {
+  if (alt > 200 || spd > 60) return "air";
+  if (spd > 3) return "taxi";
+  return "park";
+};
+const phaseColor: Record<Phase, string> = { air: "#fbbf24", taxi: "#f97316", park: "#64748b" };
+const phaseLabel: Record<Phase, string> = { air: "Airborne", taxi: "Taxi", park: "Parked" };
+
+// FR24 altitude palette
+const altColor = (alt: number) => {
+  if (alt < 500) return "#cbd5e1";
+  if (alt < 10000) return "#22c55e";
+  if (alt < 20000) return "#eab308";
+  if (alt < 30000) return "#f97316";
+  if (alt < 40000) return "#ef4444";
+  return "#d946ef";
 };
 
-// shortest-arc angle lerp
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const lerpAngle = (a: number, b: number, t: number) => {
-  let d = ((b - a + 540) % 360) - 180;
+  const d = ((b - a + 540) % 360) - 180;
   return a + d * t;
 };
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-
-function randomCid() {
-  return Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
-}
 
 type Track = {
   fromX: number; fromY: number; fromH: number;
   toX: number;   toY: number;   toH: number;
   t0: number; dur: number;
-  a: LiveAircraft;
+  p: Plane;
   marker: any;
 };
 
 function Index() {
-  const [flights, setFlights] = useState<Flight[]>([]);
-  const [airports, setAirports] = useState<Airport[]>([]);
-  const [liveCount, setLiveCount] = useState(0);
+  const [planes, setPlanes] = useState<Plane[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [phaseFilter, setPhaseFilter] = useState<string>("All");
-  const [selected, setSelected] = useState<number | null>(null);
-  const [selectedAcSnap, setSelectedAcSnap] = useState<LiveAircraft | null>(null);
-  const [phaseList, setPhaseList] = useState<string[]>(["All"]);
-  const cid = useMemo(randomCid, []);
+  const [phaseFilter, setPhaseFilter] = useState<"All" | Phase>("All");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [trail, setTrail] = useState<{ locations: LocationData[]; touchdowns: TouchdownData[] } | null>(null);
 
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const LRef = useRef<any>(null);
-  const tracks = useRef<Map<number, Track>>(new Map());
-  const history = useRef<Map<number, Array<{ x: number; y: number; alt: number }>>>(new Map());
-  const lastPollAt = useRef<number>(0);
+  const tracks = useRef<Map<string, Track>>(new Map());
   const routeLayerRef = useRef<any>(null);
-  const [pollTick, setPollTick] = useState(0);
-  const flightsByIdRef = useRef<Map<number, Flight>>(new Map());
-  const airportsByCodeRef = useRef<Map<string, Airport>>(new Map());
-  const selectedRef = useRef<number | null>(null);
-  selectedRef.current = selected;
+  const lastPollAt = useRef(0);
+  const selectedRef = useRef<string | null>(null);
+  selectedRef.current = selectedId;
 
   // Init Leaflet
   useEffect(() => {
@@ -118,7 +83,7 @@ function Index() {
         maxZoom: 11,
         zoomControl: true,
         attributionControl: false,
-      }).setView([-95, 112], 5);
+      }).setView([-56, 96], 4);
       L.tileLayer("https://pfreplay.com/api/tiles/{z}/{x}/{y}.webp?v=3", {
         tileSize: 256,
         minZoom: 2,
@@ -137,78 +102,52 @@ function Index() {
     };
   }, []);
 
-  // Fetch airports once
-  useEffect(() => {
-    fetch("https://pfreplay.com/api/airports")
-      .then((r) => r.json())
-      .then((d: Airport[]) => {
-        setAirports(d);
-        airportsByCodeRef.current = new Map(d.map((a) => [a.code, a]));
-      })
-      .catch(() => {});
-  }, []);
-
-  // Poll
+  // Poll traffic every 5s (matches project-flight cadence)
   useEffect(() => {
     let alive = true;
     async function tick() {
       try {
-        const [f, l] = await Promise.all([
-          fetch("https://pfreplay.com/api/flights?active=1").then((r) => r.json()),
-          fetch(`https://pfreplay.com/api/live?cid=${cid}`).then((r) => r.json()),
-        ]);
+        const list = await fetchTraffic();
         if (!alive) return;
-        const list: LiveResponse = l;
         const now = performance.now();
-        const observed = lastPollAt.current ? Math.min(5000, Math.max(800, now - lastPollAt.current)) : 2000;
+        const observed = lastPollAt.current ? Math.min(8000, Math.max(1500, now - lastPollAt.current)) : 5000;
         lastPollAt.current = now;
-        const dur = Math.min(3600, observed * 1.3);
+        const dur = Math.min(7000, observed * 1.2);
 
-        setFlights(f);
-        flightsByIdRef.current = new Map((f as Flight[]).map((x) => [x.id, x]));
-        setLiveCount(list.count);
+        setPlanes(list);
 
-        const L = LRef.current;
-        const map = mapRef.current;
+        const L = LRef.current; const map = mapRef.current;
         if (L && map) {
-          const seen = new Set<number>();
-          for (const a of list.aircraft) {
-            seen.add(a.flightId);
-            // append breadcrumb (dedupe near-identical points)
-            const hist = history.current.get(a.flightId) ?? [];
-            const last = hist[hist.length - 1];
-            if (!last || Math.hypot(last.x - a.x, last.y - a.y) > 80) {
-              hist.push({ x: a.x, y: a.y, alt: a.altitude });
-              if (hist.length > 600) hist.shift();
-              history.current.set(a.flightId, hist);
-            } else {
-              last.alt = a.altitude;
-            }
-            const existing = tracks.current.get(a.flightId);
+          const seen = new Set<string>();
+          for (const p of list) {
+            const id = p.server_id + ":" + p.roblox_username;
+            seen.add(id);
+            const existing = tracks.current.get(id);
             if (existing) {
               const k = existing.dur > 0 ? Math.min(1, (now - existing.t0) / existing.dur) : 1;
               existing.fromX = lerp(existing.fromX, existing.toX, k);
               existing.fromY = lerp(existing.fromY, existing.toY, k);
               existing.fromH = lerpAngle(existing.fromH, existing.toH, k);
-              existing.toX = a.x; existing.toY = a.y; existing.toH = a.heading;
+              existing.toX = p.x; existing.toY = p.y; existing.toH = p.heading;
               existing.t0 = now; existing.dur = dur;
-              existing.a = a;
+              existing.p = p;
             } else {
-              const ph = phaseStyle(a.phase);
-              const html = `<div class="pf-plane-wrap" style="transform:rotate(${a.heading}deg)"><img src="${planeIconUrl}" style="width:22px;height:22px;filter:drop-shadow(0 0 2px rgba(0,0,0,.9));"/></div>`;
+              const html = `<div class="pf-plane-wrap" style="transform:rotate(${p.heading}deg)"><img src="${planeIconUrl}" style="width:22px;height:22px;filter:drop-shadow(0 0 2px rgba(0,0,0,.9));"/></div>`;
+              const ph = derivePhase(p.altitude, p.speed);
               const icon = L.divIcon({
-                className: `pf-marker pf-${ph.group}`,
+                className: `pf-marker pf-${ph}`,
                 html,
                 iconSize: [22, 22],
                 iconAnchor: [11, 11],
               });
-              const m = L.marker(worldToLatLng(a.x, a.y), { icon, riseOnHover: true })
+              const m = L.marker(worldToLatLng(p.x, p.y), { icon, riseOnHover: true })
+                .bindTooltip(`${p.callsign} · ${p.model}`, { direction: "top", offset: [0, -8] })
                 .addTo(map)
-                .on("click", () => setSelected(a.flightId));
-              tracks.current.set(a.flightId, {
-                fromX: a.x, fromY: a.y, fromH: a.heading,
-                toX: a.x, toY: a.y, toH: a.heading,
-                t0: now, dur: 0, a, marker: m,
+                .on("click", () => setSelectedId(id));
+              tracks.current.set(id, {
+                fromX: p.x, fromY: p.y, fromH: p.heading,
+                toX: p.x, toY: p.y, toH: p.heading,
+                t0: now, dur: 0, p, marker: m,
               });
             }
           }
@@ -216,22 +155,18 @@ function Index() {
             if (!seen.has(id)) {
               map.removeLayer(t.marker);
               tracks.current.delete(id);
-              history.current.delete(id);
-              if (selectedRef.current === id) setSelected(null);
+              if (selectedRef.current === id) { setSelectedId(null); setTrail(null); }
             }
           }
-        }
-        setPollTick((n) => n + 1);
-
-        // collect phase list
-        const ps = new Set<string>();
-        list.aircraft.forEach((a) => a.phase && ps.add(a.phase));
-        setPhaseList(["All", ...Array.from(ps).sort()]);
-
-        // refresh selected snapshot
-        if (selectedRef.current != null) {
-          const sa = list.aircraft.find((a) => a.flightId === selectedRef.current);
-          if (sa) setSelectedAcSnap(sa);
+          // update marker classes
+          for (const [id, t] of tracks.current) {
+            const el = t.marker.getElement() as HTMLElement | null;
+            if (!el) continue;
+            const ph = derivePhase(t.p.altitude, t.p.speed);
+            el.classList.remove("pf-air", "pf-taxi", "pf-park");
+            el.classList.add(`pf-${ph}`);
+            el.classList.toggle("pf-selected", selectedRef.current === id);
+          }
         }
         setError(null);
       } catch (e) {
@@ -239,11 +174,11 @@ function Index() {
       }
     }
     tick();
-    const id = setInterval(tick, 2000);
-    return () => { alive = false; clearInterval(id); };
-  }, [cid]);
+    const iv = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
 
-  // rAF animation loop
+  // rAF animation
   useEffect(() => {
     let raf = 0;
     const tick = () => {
@@ -266,53 +201,40 @@ function Index() {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Update marker classes when phase changes
+  // When selection changes, poll user trail
   useEffect(() => {
-    for (const [, t] of tracks.current) {
-      const el = t.marker.getElement();
-      if (!el) continue;
-      const ph = phaseStyle(t.a.phase);
-      el.classList.remove("pf-air", "pf-taxi", "pf-park");
-      el.classList.add(`pf-${ph.group}`);
-      el.classList.toggle("pf-selected", selected === t.a.flightId);
+    if (!selectedId) { setTrail(null); return; }
+    const track = tracks.current.get(selectedId);
+    if (!track) return;
+    const username = track.p.roblox_username;
+    let alive = true;
+    let iv: any;
+    async function pull() {
+      try {
+        const d = await fetchUserTrail({ data: { username } });
+        if (alive) setTrail({ locations: d.locations ?? [], touchdowns: d.touchdowns ?? [] });
+      } catch { /* ignore */ }
     }
-  }, [liveCount, selected]);
+    pull();
+    iv = setInterval(pull, 5000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [selectedId]);
 
-  // Draw breadcrumb trail colored by flight level + dashed projection to arrival
+  // Draw trail whenever trail/selection updates
   useEffect(() => {
-    const L = LRef.current; const map = mapRef.current;
+    const L = LRef.current, map = mapRef.current;
     if (!L || !map) return;
     if (routeLayerRef.current) { map.removeLayer(routeLayerRef.current); routeLayerRef.current = null; }
-    if (selected == null) return;
-    const flight = flightsByIdRef.current.get(selected);
-    const track = tracks.current.get(selected);
-    if (!flight || !track) return;
-    const hist = history.current.get(selected) ?? [];
-    const dep = flight.dep_code ? airportsByCodeRef.current.get(flight.dep_code) : null;
-    const arr = flight.arr_code ? airportsByCodeRef.current.get(flight.arr_code) : null;
-    const cur: [number, number] = worldToLatLng(track.toX, track.toY);
+    if (!selectedId || !trail) return;
+    const track = tracks.current.get(selectedId);
+    if (!track) return;
+
     const layer = L.layerGroup();
-
-    // FR24 altitude palette: ground gray → green low → yellow mid → orange → red → magenta high
-    const altColor = (alt: number) => {
-      if (alt < 500) return "#cbd5e1";        // ground
-      if (alt < 10000) return "#22c55e";      // green
-      if (alt < 20000) return "#eab308";      // yellow
-      if (alt < 30000) return "#f97316";      // orange
-      if (alt < 40000) return "#ef4444";      // red
-      return "#d946ef";                       // magenta (very high)
-    };
-
-    // breadcrumb segments — only real observed points (no synthetic dep jump)
-    const points: Array<{ x: number; y: number; alt: number }> = [];
-    for (const p of hist) points.push(p);
-    points.push({ x: track.toX, y: track.toY, alt: track.a.altitude });
-
-    for (let i = 1; i < points.length; i++) {
-      const a = points[i - 1], b = points[i];
-      // skip absurd gaps (teleport / server change)
+    const pts = [...trail.locations, { x: track.toX, y: track.toY, altitude: track.p.altitude, speed: track.p.speed }];
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
       if (Math.hypot(a.x - b.x, a.y - b.y) > 50000) continue;
-      const avgAlt = (a.alt + b.alt) / 2;
+      const avgAlt = ((a.altitude ?? 0) + (b.altitude ?? 0)) / 2;
       L.polyline([worldToLatLng(a.x, a.y), worldToLatLng(b.x, b.y)], {
         color: altColor(avgAlt),
         weight: 3,
@@ -322,59 +244,52 @@ function Index() {
       }).addTo(layer);
     }
 
-    if (dep) {
-      L.circleMarker(worldToLatLng(dep.x, dep.y), {
-        radius: 5, color: "#f5a623", weight: 2, fillColor: "#0f172a", fillOpacity: 1,
-      }).bindTooltip(`${dep.code} · ${dep.name}`, { direction: "top" }).addTo(layer);
+    for (const t of trail.touchdowns ?? []) {
+      L.circleMarker(worldToLatLng(t.x, t.y), {
+        radius: 5, color: "#f97316", weight: 2, fillColor: "#fef3c7", fillOpacity: 1,
+      })
+        .bindTooltip(`Touchdown ${t.airport}${t.runway ? ` RWY${t.runway}` : ""} · ${Math.round(t.fpm)} fpm`, { direction: "top" })
+        .addTo(layer);
     }
-    if (arr) {
-      // dashed projected line current -> arrival
-      L.polyline([cur, worldToLatLng(arr.x, arr.y)], {
-        color: "#38bdf8", weight: 2, opacity: 0.6, dashArray: "6,6",
-      }).addTo(layer);
-      L.circleMarker(worldToLatLng(arr.x, arr.y), {
-        radius: 5, color: "#38bdf8", weight: 2, fillColor: "#0f172a", fillOpacity: 1,
-      }).bindTooltip(`${arr.code} · ${arr.name}`, { direction: "top" }).addTo(layer);
-    }
+
     layer.addTo(map);
     routeLayerRef.current = layer;
-  }, [selected, flights, airports, pollTick]);
+  }, [trail, selectedId]);
 
-  const rows = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return flights
-      .map((f) => ({ flight: f, pos: Array.from(tracks.current.values()).find((t) => t.a.flightId === f.id)?.a }))
-      .filter(({ flight, pos }) => {
-        if (phaseFilter !== "All" && pos?.phase !== phaseFilter) return false;
-        if (!q) return true;
-        return (
-          flight.callsign.toLowerCase().includes(q) ||
-          flight.player.toLowerCase().includes(q) ||
-          flight.aircraft.toLowerCase().includes(q) ||
-          (flight.dep_code ?? "").toLowerCase().includes(q) ||
-          (flight.arr_code ?? "").toLowerCase().includes(q) ||
-          (flight.dep_name ?? "").toLowerCase().includes(q) ||
-          (flight.arr_name ?? "").toLowerCase().includes(q)
-        );
-      });
-  }, [flights, query, phaseFilter, liveCount]);
+    return planes.filter((p) => {
+      const ph = derivePhase(p.altitude, p.speed);
+      if (phaseFilter !== "All" && ph !== phaseFilter) return false;
+      if (!q) return true;
+      return (
+        p.callsign.toLowerCase().includes(q) ||
+        p.roblox_username.toLowerCase().includes(q) ||
+        p.model.toLowerCase().includes(q) ||
+        p.livery.toLowerCase().includes(q) ||
+        p.server_id.toLowerCase().includes(q)
+      );
+    }).sort((a, b) => a.callsign.localeCompare(b.callsign));
+  }, [planes, query, phaseFilter]);
 
-  const focus = (flightId: number) => {
-    const t = tracks.current.get(flightId);
+  const focus = (id: string) => {
+    const t = tracks.current.get(id);
     if (!t || !mapRef.current) return;
     mapRef.current.setView(worldToLatLng(t.toX, t.toY), Math.max(mapRef.current.getZoom(), 6), { animate: true });
-    setSelected(flightId);
-    setSelectedAcSnap(t.a);
+    setSelectedId(id);
   };
 
-  const selectedFlight = selected != null ? flights.find((f) => f.id === selected) : null;
-  const selectedAc = selectedAcSnap && selected === selectedAcSnap.flightId ? selectedAcSnap : null;
+  const sel = selectedId ? tracks.current.get(selectedId)?.p ?? null : null;
+  const counts = useMemo(() => {
+    const c = { air: 0, taxi: 0, park: 0 };
+    for (const p of planes) c[derivePhase(p.altitude, p.speed)]++;
+    return c;
+  }, [planes]);
 
   return (
     <div className="h-screen w-screen bg-[#0a0d14] text-slate-100 flex flex-col">
       <style>{`
         .pf-marker .pf-plane-wrap { width:22px; height:22px; transition: transform .25s linear; }
-        .pf-marker img { transition: filter .2s; }
         .pf-air img   { filter: drop-shadow(0 0 3px rgba(245,166,35,.85)) brightness(1.05) !important; }
         .pf-taxi img  { filter: drop-shadow(0 0 3px rgba(249,115,22,.85)) hue-rotate(-25deg) !important; }
         .pf-park img  { filter: drop-shadow(0 0 2px rgba(100,116,139,.8)) grayscale(.7) opacity(.7) !important; }
@@ -383,16 +298,16 @@ function Index() {
       `}</style>
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-sm font-semibold tracking-tight">PFReplay Live · FR24-style</h1>
-          <p className="text-[10px] text-slate-400">Tiles & data: pfreplay.com · interpolated @ 60fps</p>
+          <h1 className="text-sm font-semibold tracking-tight">Project-Flight Live · Official API</h1>
+          <p className="text-[10px] text-slate-400">api.project-flight.com/v3/traffic · real trails from /fetch/&lt;user&gt; · tiles: pfreplay</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
-          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#f5a623]" />Airborne</span>
-          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#f97316]" />Taxi</span>
-          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#64748b]" />Parked</span>
+          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#fbbf24]" />{counts.air} air</span>
+          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#f97316]" />{counts.taxi} taxi</span>
+          <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#64748b]" />{counts.park} parked</span>
           <span className="inline-flex items-center gap-2 ml-2">
             <span className="size-2 rounded-full bg-sky-400 animate-pulse" />
-            {liveCount} live · {flights.length} flights
+            {planes.length} planes
           </span>
         </div>
       </header>
@@ -404,42 +319,40 @@ function Index() {
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 relative">
           <div ref={mapEl} className="absolute inset-0 bg-[#0a0f1a]" />
-          {selectedAc && selectedFlight && (
+          {sel && (
             <div className="absolute top-2 right-2 z-[500] w-72 rounded-lg border border-white/10 bg-[#0a0f1a]/95 backdrop-blur p-3 text-xs shadow-xl">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold text-sm text-sky-300">{selectedFlight.callsign}</div>
-                  <div className="text-slate-400">{selectedFlight.player}</div>
+                  <div className="font-semibold text-sm text-sky-300">{sel.callsign}</div>
+                  <div className="text-slate-400">{sel.roblox_username}</div>
                 </div>
-                <button onClick={() => setSelected(null)} className="text-slate-500 hover:text-slate-200">✕</button>
+                <button onClick={() => setSelectedId(null)} className="text-slate-500 hover:text-slate-200">✕</button>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2 text-slate-300">
-                <div><div className="text-slate-500">Aircraft</div>{selectedAc.aircraft}</div>
-                <div><div className="text-slate-500">Livery</div>{selectedAc.livery}</div>
-                <div><div className="text-slate-500">Phase</div><span style={{ color: phaseStyle(selectedAc.phase).color }}>{selectedAc.phase}</span></div>
-                <div><div className="text-slate-500">Server</div>{selectedAc.serverId}</div>
-                <div><div className="text-slate-500">Alt</div>{selectedAc.altitude.toLocaleString()} ft</div>
-                <div><div className="text-slate-500">Spd</div>{selectedAc.speed} kt</div>
-                <div><div className="text-slate-500">Hdg</div>{Math.round(selectedAc.heading)}°</div>
-                <div><div className="text-slate-500">Flight ID</div>{selectedAc.flightId}</div>
-              </div>
-              <div className="mt-3 border-t border-white/10 pt-2">
-                <div className="text-slate-500 mb-1">Route</div>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-mono text-[#f5a623]">{selectedFlight.dep_code ?? "—"}</div>
-                    <div className="text-slate-400 text-[10px] truncate">{selectedFlight.dep_name ?? "Unknown departure"}</div>
-                  </div>
-                  <div className="text-slate-500">→</div>
-                  <div className="min-w-0 text-right">
-                    <div className="font-mono text-[#38bdf8]">{selectedFlight.arr_code ?? "—"}</div>
-                    <div className="text-slate-400 text-[10px] truncate">{selectedFlight.arr_name ?? "No destination set"}</div>
-                  </div>
+                <div><div className="text-slate-500">Aircraft</div>{sel.model}</div>
+                <div><div className="text-slate-500">Livery</div>{sel.livery || "—"}</div>
+                <div><div className="text-slate-500">Phase</div>
+                  <span style={{ color: phaseColor[derivePhase(sel.altitude, sel.speed)] }}>
+                    {phaseLabel[derivePhase(sel.altitude, sel.speed)]}
+                  </span>
                 </div>
-                <div className="mt-2 text-[10px] text-slate-500">
-                  Started {new Date(selectedFlight.started_at).toLocaleTimeString()} · Last seen {new Date(selectedFlight.last_seen).toLocaleTimeString()}
-                </div>
+                <div><div className="text-slate-500">Server</div><span className="font-mono">{sel.server_id}</span></div>
+                <div><div className="text-slate-500">Alt</div>{Math.round(sel.altitude).toLocaleString()} ft</div>
+                <div><div className="text-slate-500">Spd</div>{Math.round(sel.speed)} kt</div>
+                <div><div className="text-slate-500">Hdg</div>{Math.round(sel.heading)}°</div>
+                <div><div className="text-slate-500">Trail pts</div>{trail?.locations.length ?? 0}</div>
               </div>
+              {trail && trail.touchdowns.length > 0 && (
+                <div className="mt-3 border-t border-white/10 pt-2">
+                  <div className="text-slate-500 mb-1">Touchdowns</div>
+                  {trail.touchdowns.slice(-3).map((t, i) => (
+                    <div key={i} className="text-[10px] text-slate-300 flex justify-between">
+                      <span className="font-mono text-[#f97316]">{t.airport} {t.runway && `RWY${t.runway}`}</span>
+                      <span className="text-slate-400">{Math.round(t.fpm)} fpm</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -449,39 +362,43 @@ function Index() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search callsign, player, airport…"
+              placeholder="Search callsign, user, aircraft…"
               className="flex-1 bg-[#070a13] border border-white/10 rounded px-2 py-1 text-xs placeholder:text-slate-500 focus:outline-none focus:border-yellow-500"
             />
             <select
               value={phaseFilter}
-              onChange={(e) => setPhaseFilter(e.target.value)}
+              onChange={(e) => setPhaseFilter(e.target.value as any)}
               className="bg-[#070a13] border border-white/10 rounded px-1 py-1 text-xs"
             >
-              {phaseList.map((p) => <option key={p} value={p}>{p}</option>)}
+              <option value="All">All</option>
+              <option value="air">Airborne</option>
+              <option value="taxi">Taxi</option>
+              <option value="park">Parked</option>
             </select>
           </div>
-          <div className="px-2 py-1 text-[10px] text-slate-500 border-b border-white/5">{rows.length} shown</div>
+          <div className="px-2 py-1 text-[10px] text-slate-500 border-b border-white/5">{filtered.length} shown</div>
           <div className="flex-1 overflow-auto">
             <table className="w-full text-[11px]">
               <tbody>
-                {rows.map(({ flight, pos }) => {
-                  const ph = phaseStyle(pos?.phase);
+                {filtered.map((p) => {
+                  const id = p.server_id + ":" + p.roblox_username;
+                  const ph = derivePhase(p.altitude, p.speed);
                   return (
                     <tr
-                      key={flight.id}
-                      onClick={() => focus(flight.id)}
-                      className={`border-b border-white/5 cursor-pointer hover:bg-white/5 ${selected === flight.id ? "bg-yellow-500/10" : ""}`}
+                      key={id}
+                      onClick={() => focus(id)}
+                      className={`border-b border-white/5 cursor-pointer hover:bg-white/5 ${selectedId === id ? "bg-sky-500/10" : ""}`}
                     >
                       <td className="px-2 py-1.5">
                         <div className="flex items-center gap-1.5">
-                          <span className="inline-block size-2 rounded-full" style={{ background: ph.color }} />
-                          <span className="font-medium text-slate-100">{flight.callsign}</span>
+                          <span className="inline-block size-2 rounded-full" style={{ background: phaseColor[ph] }} />
+                          <span className="font-medium text-slate-100">{p.callsign}</span>
                         </div>
-                        <div className="text-slate-500">{flight.aircraft} · {flight.dep_code ?? "—"}→{flight.arr_code ?? "—"}</div>
+                        <div className="text-slate-500 truncate">{p.model} · {p.roblox_username}</div>
                       </td>
                       <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">
-                        <div>{pos?.altitude.toLocaleString() ?? "—"}<span className="text-slate-500"> ft</span></div>
-                        <div className="text-slate-500">{pos?.speed ?? "—"} kt</div>
+                        <div>{Math.round(p.altitude).toLocaleString()}<span className="text-slate-500"> ft</span></div>
+                        <div className="text-slate-500">{Math.round(p.speed)} kt</div>
                       </td>
                     </tr>
                   );
