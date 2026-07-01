@@ -397,8 +397,8 @@ function Index() {
                         <div className="text-slate-500 truncate">{p.model} · {p.roblox_username}</div>
                       </td>
                       <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">
-                        <div>{Math.round(p.altitude).toLocaleString()}<span className="text-slate-500"> ft</span></div>
-                        <div className="text-slate-500">{Math.round(p.speed)} kt</div>
+                        <div>{Math.round(p.altitude ?? 0).toLocaleString()}<span className="text-slate-500"> ft</span></div>
+                        <div className="text-slate-500">{Math.round(p.speed ?? 0)} kt</div>
                       </td>
                     </tr>
                   );
