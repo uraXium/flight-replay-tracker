@@ -206,12 +206,13 @@ function Index() {
     if (!selectedId) { setTrail(null); return; }
     const track = tracks.current.get(selectedId);
     if (!track) return;
-    const username = track.p.roblox_username;
+    const flightId = track.p.flight_id;
+    if (!flightId) { setTrail(null); return; }
     let alive = true;
     let iv: any;
     async function pull() {
       try {
-        const d = await fetchUserTrail({ data: { username } });
+        const d = await fetchUserTrail({ data: { flightId } });
         if (alive) setTrail({ locations: d.locations ?? [], touchdowns: d.touchdowns ?? [] });
       } catch { /* ignore */ }
     }
@@ -298,8 +299,8 @@ function Index() {
       `}</style>
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-sm font-semibold tracking-tight">Project-Flight Live · Official API</h1>
-          <p className="text-[10px] text-slate-400">api.project-flight.com/v3/traffic · real trails from /fetch/&lt;user&gt; · tiles: pfreplay</p>
+          <h1 className="text-sm font-semibold tracking-tight">PTFS Live Traffic</h1>
+          <p className="text-[10px] text-slate-400">pfreplay feed · real recorded trails per flight · tiles: pfreplay</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#fbbf24]" />{counts.air} air</span>

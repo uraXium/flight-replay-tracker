@@ -11,6 +11,7 @@ export type Plane = {
   speed: number;
   model: string;
   livery: string;
+  flight_id?: number;
 };
 export type LocationData = { x: number; y: number; altitude: number; speed: number; ts?: number };
 export type TouchdownData = { x: number; y: number; airport: string; runway: string; fpm: number; ts?: number };
