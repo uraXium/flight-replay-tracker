@@ -206,12 +206,13 @@ function Index() {
     if (!selectedId) { setTrail(null); return; }
     const track = tracks.current.get(selectedId);
     if (!track) return;
-    const username = track.p.roblox_username;
+    const flightId = track.p.flight_id;
+    if (!flightId) { setTrail(null); return; }
     let alive = true;
     let iv: any;
     async function pull() {
       try {
-        const d = await fetchUserTrail({ data: { username } });
+        const d = await fetchUserTrail({ data: { flightId } });
         if (alive) setTrail({ locations: d.locations ?? [], touchdowns: d.touchdowns ?? [] });
       } catch { /* ignore */ }
     }
