@@ -1,68 +1,59 @@
 import { createServerFn } from "@tanstack/react-start";
-import type { LocationData, Plane, TouchdownData } from "./pf-proto";
+import type { Plane } from "./pf-proto";
 
-// project-flight's own API (api.project-flight.com/v3/traffic/*) is currently
-// returning 404 for everyone, including their official tracker. pfreplay mirrors
-// the same PTFS traffic feed (and stores real recorded tracks), so we read from it.
-const BASE = "https://pfreplay.com";
+// pfreplay.com is offline (whole site returns 404) and api.project-flight.com
+// no longer serves /v3/traffic/*. The ATC24 open data feed mirrors the same
+// PTFS live traffic and is currently the only working public source.
+const BASE = "https://24data.ptfs.app";
 
 async function json<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`, {
     headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 (compatible; PFTracker/1.0)" },
   });
-  if (!r.ok) throw new Error(`pfreplay ${path} ${r.status}`);
+  if (!r.ok) throw new Error(`24data ${path} ${r.status}`);
   return (await r.json()) as T;
 }
 
-type LiveAircraft = {
-  callsign: string;
-  player: string;
-  serverId: string;
-  x: number;
-  y: number;
+type Acft = {
+  playerName: string;
   heading: number;
   altitude: number;
   speed: number;
-  aircraft: string;
-  livery: string;
-  phase: string;
-  flightId: number;
+  groundSpeed: number;
+  aircraftType: string;
+  isOnGround: boolean;
+  isEmergencyOccuring: boolean;
+  wind: string;
+  position: { x: number; y: number };
 };
 
 export const fetchTraffic = createServerFn({ method: "GET" }).handler(async (): Promise<Plane[]> => {
-  const d = await json<{ aircraft: LiveAircraft[] }>(`/api/live?cid=${Math.random().toString(36).slice(2)}`);
-  return (d.aircraft ?? []).map((a) => ({
-    server_id: String(a.serverId ?? "").replace(/[{}]/g, "").slice(0, 8),
-    callsign: a.callsign ?? "",
-    roblox_username: a.player ?? "",
-    x: a.x,
-    y: a.y,
+  const d = await json<Record<string, Acft>>("/acft-data");
+  return Object.entries(d ?? {}).map(([callsign, a]) => ({
+    server_id: a.isEmergencyOccuring ? "EMERG" : "",
+    callsign,
+    roblox_username: a.playerName ?? "",
+    x: a.position?.x ?? 0,
+    y: a.position?.y ?? 0,
     heading: a.heading ?? 0,
     altitude: a.altitude ?? 0,
-    speed: a.speed ?? 0,
-    model: a.aircraft ?? "",
-    livery: a.livery ?? "",
-    flight_id: a.flightId,
+    speed: a.speed ?? a.groundSpeed ?? 0,
+    model: a.aircraftType ?? "",
+    livery: a.wind ? `wind ${a.wind}` : "",
   }));
 });
 
-export const fetchUserTrail = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => {
-    const o = d as { flightId?: unknown };
-    const n = Number(o?.flightId);
-    if (!Number.isFinite(n)) throw new Error("flightId required");
-    return { flightId: n };
-  })
-  .handler(async ({ data }): Promise<{ locations: LocationData[]; touchdowns: TouchdownData[] }> => {
-    const d = await json<{ track: { x: number; y: number; altitude: number; speed: number; t: number }[] }>(
-      `/api/flights/${data.flightId}/track`,
-    );
-    const locations = (d.track ?? []).map((p) => ({
-      x: p.x,
-      y: p.y,
-      altitude: p.altitude ?? 0,
-      speed: p.speed ?? 0,
-      ts: p.t,
-    }));
-    return { locations, touchdowns: [] };
-  });
+export type Controller = {
+  holder: string;
+  airport: string;
+  position: string;
+  heldSince: number;
+  queue: string[];
+};
+
+export const fetchControllers = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Controller[]> => {
+    const d = await json<Controller[]>("/controllers");
+    return Array.isArray(d) ? d : [];
+  },
+);
