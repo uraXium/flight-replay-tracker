@@ -14,11 +14,8 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-// pfreplay tile affine (same coord system as PF): lat = -0.00072*y - 67.5, lng = 0.00072*x + 120
-const worldToLatLng = (x: number, y: number): [number, number] => [
-  -0.00072 * y - 67.5,
-  0.00072 * x + 120,
-];
+// ATC24 world units -> simple CRS plane coords
+const worldToLatLng = (x: number, y: number): [number, number] => [y / 1000, x / 1000];
 
 type Phase = "air" | "taxi" | "park";
 const derivePhase = (alt: number, spd: number): Phase => {
