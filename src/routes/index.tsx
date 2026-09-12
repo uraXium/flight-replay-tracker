@@ -1,24 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import planeIconUrl from "@/assets/plane.svg";
-import { fetchTraffic, fetchUserTrail } from "@/lib/pf-server";
+import { fetchTraffic } from "@/lib/pf-server";
 import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Project-Flight Live Tracker" },
-      { name: "description", content: "Live PTFS traffic from tracker.project-flight.com — real trails from official API." },
+      { title: "PTFS Live Traffic Tracker" },
+      { name: "description", content: "Live Project Flight (PTFS) traffic map with callsigns, altitude, speed and live trails." },
+      { property: "og:title", content: "PTFS Live Traffic Tracker" },
+      { property: "og:description", content: "Live Project Flight (PTFS) traffic map with callsigns, altitude, speed and live trails." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: Index,
 });
 
-// pfreplay tile affine (same coord system as PF): lat = -0.00072*y - 67.5, lng = 0.00072*x + 120
-const worldToLatLng = (x: number, y: number): [number, number] => [
-  -0.00072 * y - 67.5,
-  0.00072 * x + 120,
-];
+// ATC24 world units -> simple CRS plane coords
+const worldToLatLng = (x: number, y: number): [number, number] => [y / 1000, x / 1000];
 
 type Phase = "air" | "taxi" | "park";
 const derivePhase = (alt: number, spd: number): Phase => {
@@ -51,6 +52,7 @@ type Track = {
   t0: number; dur: number;
   p: Plane;
   marker: any;
+  hist: LocationData[];
 };
 
 function Index() {
@@ -79,20 +81,18 @@ function Index() {
       LRef.current = L;
       const map = L.map(mapEl.current, {
         crs: L.CRS.Simple,
-        minZoom: 2,
-        maxZoom: 11,
+        minZoom: 1,
+        maxZoom: 9,
         zoomControl: true,
         attributionControl: false,
-      }).setView([-56, 96], 4);
-      L.tileLayer("https://pfreplay.com/api/tiles/{z}/{x}/{y}.webp?v=3", {
-        tileSize: 256,
-        minZoom: 2,
-        maxZoom: 11,
-        maxNativeZoom: 8,
-        noWrap: true,
-        bounds: L.latLngBounds([-112, 16], [0, 176]),
-        keepBuffer: 8,
-      }).addTo(map);
+      }).setView([0, 0], 3);
+      // grid reference lines (no public PTFS tile server is online right now)
+      const grid = L.layerGroup().addTo(map);
+      for (let v = -60; v <= 60; v += 10) {
+        const style = { color: "#1e293b", weight: v === 0 ? 1.5 : 0.7, opacity: 0.9 };
+        L.polyline([[v, -60], [v, 60]], style).addTo(grid);
+        L.polyline([[-60, v], [60, v]], style).addTo(grid);
+      }
       mapRef.current = map;
     })();
     return () => {
@@ -120,10 +120,15 @@ function Index() {
         if (L && map) {
           const seen = new Set<string>();
           for (const p of list) {
-            const id = p.server_id + ":" + p.roblox_username;
+            const id = p.callsign + ":" + p.roblox_username;
             seen.add(id);
             const existing = tracks.current.get(id);
             if (existing) {
+              const last = existing.hist[existing.hist.length - 1];
+              if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 10) {
+                existing.hist.push({ x: p.x, y: p.y, altitude: p.altitude, speed: p.speed, ts: Date.now() });
+                if (existing.hist.length > 900) existing.hist.shift();
+              }
               const k = existing.dur > 0 ? Math.min(1, (now - existing.t0) / existing.dur) : 1;
               existing.fromX = lerp(existing.fromX, existing.toX, k);
               existing.fromY = lerp(existing.fromY, existing.toY, k);
@@ -148,6 +153,7 @@ function Index() {
                 fromX: p.x, fromY: p.y, fromH: p.heading,
                 toX: p.x, toY: p.y, toH: p.heading,
                 t0: now, dur: 0, p, marker: m,
+                hist: [{ x: p.x, y: p.y, altitude: p.altitude, speed: p.speed, ts: Date.now() }],
               });
             }
           }
@@ -201,24 +207,16 @@ function Index() {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // When selection changes, poll user trail
+  // Trail for the selected flight, built from positions observed since load
   useEffect(() => {
     if (!selectedId) { setTrail(null); return; }
-    const track = tracks.current.get(selectedId);
-    if (!track) return;
-    const flightId = track.p.flight_id;
-    if (!flightId) { setTrail(null); return; }
-    let alive = true;
-    let iv: any;
-    async function pull() {
-      try {
-        const d = await fetchUserTrail({ data: { flightId } });
-        if (alive) setTrail({ locations: d.locations ?? [], touchdowns: d.touchdowns ?? [] });
-      } catch { /* ignore */ }
-    }
-    pull();
-    iv = setInterval(pull, 5000);
-    return () => { alive = false; clearInterval(iv); };
+    const read = () => {
+      const track = tracks.current.get(selectedId);
+      setTrail(track ? { locations: [...track.hist], touchdowns: [] as TouchdownData[] } : null);
+    };
+    read();
+    const iv = setInterval(read, 5000);
+    return () => clearInterval(iv);
   }, [selectedId]);
 
   // Draw trail whenever trail/selection updates
@@ -300,7 +298,7 @@ function Index() {
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-sm font-semibold tracking-tight">PTFS Live Traffic</h1>
-          <p className="text-[10px] text-slate-400">pfreplay feed · real recorded trails per flight · tiles: pfreplay</p>
+          <p className="text-[10px] text-slate-400">ATC24 live feed (24data.ptfs.app) · trails build up while the page is open</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#fbbf24]" />{counts.air} air</span>
@@ -382,7 +380,7 @@ function Index() {
             <table className="w-full text-[11px]">
               <tbody>
                 {filtered.map((p) => {
-                  const id = p.server_id + ":" + p.roblox_username;
+                  const id = p.callsign + ":" + p.roblox_username;
                   const ph = derivePhase(p.altitude, p.speed);
                   return (
                     <tr
