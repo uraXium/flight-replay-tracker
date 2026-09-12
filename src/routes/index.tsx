@@ -7,8 +7,12 @@ import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Project-Flight Live Tracker" },
-      { name: "description", content: "Live PTFS traffic from tracker.project-flight.com — real trails from official API." },
+      { title: "PTFS Live Traffic Tracker" },
+      { name: "description", content: "Live Project Flight (PTFS) traffic map with callsigns, altitude, speed and live trails." },
+      { property: "og:title", content: "PTFS Live Traffic Tracker" },
+      { property: "og:description", content: "Live Project Flight (PTFS) traffic map with callsigns, altitude, speed and live trails." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: Index,
@@ -294,7 +298,7 @@ function Index() {
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-sm font-semibold tracking-tight">PTFS Live Traffic</h1>
-          <p className="text-[10px] text-slate-400">pfreplay feed · real recorded trails per flight · tiles: pfreplay</p>
+          <p className="text-[10px] text-slate-400">ATC24 live feed (24data.ptfs.app) · trails build up while the page is open</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#fbbf24]" />{counts.air} air</span>
@@ -376,7 +380,7 @@ function Index() {
             <table className="w-full text-[11px]">
               <tbody>
                 {filtered.map((p) => {
-                  const id = p.server_id + ":" + p.roblox_username;
+                  const id = p.callsign + ":" + p.roblox_username;
                   const ph = derivePhase(p.altitude, p.speed);
                   return (
                     <tr
