@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import planeIconUrl from "@/assets/plane.svg";
-import { fetchTraffic, fetchUserTrail } from "@/lib/pf-server";
+import { fetchTraffic } from "@/lib/pf-server";
 import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
 
 export const Route = createFileRoute("/")({
