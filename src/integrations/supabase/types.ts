@@ -14,7 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      live_aircraft: {
+        Row: {
+          aircraft_type: string
+          altitude: number
+          callsign: string
+          heading: number
+          id: string
+          player: string
+          server_job_id: string
+          speed: number
+          squawk: string
+          updated_at: string
+          x: number
+          y: number
+        }
+        Insert: {
+          aircraft_type?: string
+          altitude?: number
+          callsign?: string
+          heading?: number
+          id: string
+          player?: string
+          server_job_id?: string
+          speed?: number
+          squawk?: string
+          updated_at?: string
+          x?: number
+          y?: number
+        }
+        Update: {
+          aircraft_type?: string
+          altitude?: number
+          callsign?: string
+          heading?: number
+          id?: string
+          player?: string
+          server_job_id?: string
+          speed?: number
+          squawk?: string
+          updated_at?: string
+          x?: number
+          y?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
