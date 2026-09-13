@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import planeIconUrl from "@/assets/plane.svg";
-import { fetchTraffic } from "@/lib/pf-server";
+import { fetchTraffic, type TrafficSource } from "@/lib/pf-server";
+import airportsData from "@/lib/airports.json";
 import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
 
 export const Route = createFileRoute("/")({
@@ -18,8 +19,8 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-// ATC24 world units -> simple CRS plane coords
-const worldToLatLng = (x: number, y: number): [number, number] => [y / 1000, x / 1000];
+// PTFS world units (same grid as navdata airports/fixes) -> simple CRS plane coords
+const worldToLatLng = (x: number, y: number): [number, number] => [-y, x];
 
 type Phase = "air" | "taxi" | "park";
 const derivePhase = (alt: number, spd: number): Phase => {
