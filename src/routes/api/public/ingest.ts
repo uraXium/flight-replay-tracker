@@ -32,8 +32,8 @@ export const Route = createFileRoute("/api/public/ingest")({
           request.headers.get("x-ingest-token") ??
           request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
           new URL(request.url).searchParams.get("token");
-        const expected = process.env["INGEST_TOKEN"];
-        if (!expected || token !== expected) return json({ error: "unauthorized" }, 401);
+        const allowed = [process.env["PF_INGEST_TOKEN"], process.env["INGEST_TOKEN"]].filter(Boolean);
+        if (!token || !allowed.includes(token)) return json({ error: "unauthorized" }, 401);
 
         let parsed;
         try {
