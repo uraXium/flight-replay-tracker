@@ -14,7 +14,7 @@ const ATC24 = "https://24data.ptfs.app";
 
 const UA = "Mozilla/5.0 (compatible; PFTracker/1.0)";
 
-export type TrafficSource = "celesbit" | "project-flight" | "atc24";
+export type TrafficSource = "own-scraper" | "celesbit" | "project-flight" | "atc24";
 export type TrafficResult = { source: TrafficSource; planes: Plane[]; capturedAt?: string };
 
 type CelesbitAcft = {
@@ -109,8 +109,37 @@ async function tryAtc24(): Promise<Plane[]> {
   }));
 }
 
+// Your own telemetry, posted by the Roblox scraper to /api/public/ingest.
+async function tryOwnScraper(): Promise<Plane[] | null> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const since = new Date(Date.now() - 20_000).toISOString();
+    const { data, error } = await supabaseAdmin
+      .from("live_aircraft")
+      .select("id, callsign, squawk, x, y, altitude, heading, speed, aircraft_type, player")
+      .gt("updated_at", since);
+    if (error || !data || !data.length) return null;
+    return data.map((a) => ({
+      server_id: a.squawk ?? "",
+      callsign: a.callsign || a.id,
+      roblox_username: a.player ?? "",
+      x: a.x,
+      y: a.y,
+      heading: a.heading ?? 0,
+      altitude: a.altitude ?? 0,
+      speed: a.speed ?? 0,
+      model: a.aircraft_type ?? "",
+      livery: "",
+    }));
+  } catch {
+    return null;
+  }
+}
+
 export const fetchTraffic = createServerFn({ method: "GET" }).handler(
   async (): Promise<TrafficResult> => {
+    const own = await tryOwnScraper();
+    if (own) return { source: "own-scraper", planes: own };
     const cb = await tryCelesbit();
     if (cb) return { source: "celesbit", planes: cb.planes, capturedAt: cb.capturedAt };
     const pf = await tryProjectFlight();
