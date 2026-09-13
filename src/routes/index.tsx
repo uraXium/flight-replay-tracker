@@ -137,7 +137,7 @@ function Index() {
             const existing = tracks.current.get(id);
             if (existing) {
               const last = existing.hist[existing.hist.length - 1];
-              if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 10) {
+              if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 0.05) {
                 existing.hist.push({ x: p.x, y: p.y, altitude: p.altitude, speed: p.speed, ts: Date.now() });
                 if (existing.hist.length > 900) existing.hist.shift();
               }
@@ -310,7 +310,7 @@ function Index() {
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-sm font-semibold tracking-tight">PTFS Live Traffic</h1>
-          <p className="text-[10px] text-slate-400">ATC24 live feed (24data.ptfs.app) · trails build up while the page is open</p>
+          <p className="text-[10px] text-slate-400">live source: {source ?? "connecting…"} · trails build up while the page is open</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#fbbf24]" />{counts.air} air</span>
