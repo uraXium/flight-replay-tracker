@@ -305,6 +305,7 @@ function Index() {
         .pf-taxi img  { filter: drop-shadow(0 0 3px rgba(249,115,22,.85)) hue-rotate(-25deg) !important; }
         .pf-park img  { filter: drop-shadow(0 0 2px rgba(100,116,139,.8)) grayscale(.7) opacity(.7) !important; }
         .pf-selected img { filter: drop-shadow(0 0 6px #38bdf8) brightness(1.2) !important; }
+        .leaflet-container { background:#0a0f1a; }
         .leaflet-tooltip { background:#0a0f1a; color:#f1f5f9; border:1px solid rgba(255,255,255,.15); font-size:11px; }
       `}</style>
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
