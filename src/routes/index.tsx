@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import planeIconUrl from "@/assets/plane.svg";
-import { fetchTraffic } from "@/lib/pf-server";
+import { fetchTraffic, type TrafficSource } from "@/lib/pf-server";
+import airportsData from "@/lib/airports.json";
 import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
 
 export const Route = createFileRoute("/")({
@@ -18,8 +19,8 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-// ATC24 world units -> simple CRS plane coords
-const worldToLatLng = (x: number, y: number): [number, number] => [y / 1000, x / 1000];
+// PTFS world units (same grid as navdata airports/fixes) -> simple CRS plane coords
+const worldToLatLng = (x: number, y: number): [number, number] => [-y, x];
 
 type Phase = "air" | "taxi" | "park";
 const derivePhase = (alt: number, spd: number): Phase => {
@@ -58,6 +59,7 @@ type Track = {
 function Index() {
   const [planes, setPlanes] = useState<Plane[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<TrafficSource | null>(null);
   const [query, setQuery] = useState("");
   const [phaseFilter, setPhaseFilter] = useState<"All" | Phase>("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -85,13 +87,21 @@ function Index() {
         maxZoom: 9,
         zoomControl: true,
         attributionControl: false,
-      }).setView([0, 0], 3);
+      }).setView([-270, 270], 2);
       // grid reference lines (no public PTFS tile server is online right now)
       const grid = L.layerGroup().addTo(map);
-      for (let v = -60; v <= 60; v += 10) {
-        const style = { color: "#1e293b", weight: v === 0 ? 1.5 : 0.7, opacity: 0.9 };
-        L.polyline([[v, -60], [v, 60]], style).addTo(grid);
-        L.polyline([[-60, v], [60, v]], style).addTo(grid);
+      for (let v = 0; v <= 450; v += 25) {
+        const style = { color: "#1e293b", weight: 0.7, opacity: 0.9 };
+        L.polyline([[-450, v], [0, v]], style).addTo(grid);
+        L.polyline([[-v, 0], [-v, 450]], style).addTo(grid);
+      }
+      // navdata airports for reference / alignment check
+      for (const a of (airportsData as { results: { icao: string; name: string; x: number; y: number }[] }).results) {
+        L.circleMarker(worldToLatLng(a.x, a.y), {
+          radius: 3, color: "#38bdf8", weight: 1.5, fillColor: "#0a0f1a", fillOpacity: 1,
+        })
+          .bindTooltip(`${a.icao} · ${a.name}`, { direction: "top" })
+          .addTo(grid);
       }
       mapRef.current = map;
     })();
@@ -107,8 +117,10 @@ function Index() {
     let alive = true;
     async function tick() {
       try {
-        const list = await fetchTraffic();
+        const res = await fetchTraffic();
+        const list = res.planes;
         if (!alive) return;
+        setSource(res.source);
         const now = performance.now();
         const observed = lastPollAt.current ? Math.min(8000, Math.max(1500, now - lastPollAt.current)) : 5000;
         lastPollAt.current = now;
@@ -125,7 +137,7 @@ function Index() {
             const existing = tracks.current.get(id);
             if (existing) {
               const last = existing.hist[existing.hist.length - 1];
-              if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 10) {
+              if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 0.05) {
                 existing.hist.push({ x: p.x, y: p.y, altitude: p.altitude, speed: p.speed, ts: Date.now() });
                 if (existing.hist.length > 900) existing.hist.shift();
               }
@@ -232,7 +244,7 @@ function Index() {
     const pts = [...trail.locations, { x: track.toX, y: track.toY, altitude: track.p.altitude, speed: track.p.speed }];
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1], b = pts[i];
-      if (Math.hypot(a.x - b.x, a.y - b.y) > 50000) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 50) continue;
       const avgAlt = ((a.altitude ?? 0) + (b.altitude ?? 0)) / 2;
       L.polyline([worldToLatLng(a.x, a.y), worldToLatLng(b.x, b.y)], {
         color: altColor(avgAlt),
@@ -293,12 +305,13 @@ function Index() {
         .pf-taxi img  { filter: drop-shadow(0 0 3px rgba(249,115,22,.85)) hue-rotate(-25deg) !important; }
         .pf-park img  { filter: drop-shadow(0 0 2px rgba(100,116,139,.8)) grayscale(.7) opacity(.7) !important; }
         .pf-selected img { filter: drop-shadow(0 0 6px #38bdf8) brightness(1.2) !important; }
+        .leaflet-container { background:#0a0f1a; }
         .leaflet-tooltip { background:#0a0f1a; color:#f1f5f9; border:1px solid rgba(255,255,255,.15); font-size:11px; }
       `}</style>
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-sm font-semibold tracking-tight">PTFS Live Traffic</h1>
-          <p className="text-[10px] text-slate-400">ATC24 live feed (24data.ptfs.app) · trails build up while the page is open</p>
+          <p className="text-[10px] text-slate-400">live source: {source ?? "connecting…"} · trails build up while the page is open</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#fbbf24]" />{counts.air} air</span>

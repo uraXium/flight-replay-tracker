@@ -1,17 +1,59 @@
 import { createServerFn } from "@tanstack/react-start";
-import { decodeMultiPlanes, decodeUserPlane } from "./pf-proto";
-import type { LocationData, Plane, TouchdownData } from "./pf-proto";
+import { decodeMultiPlanes } from "./pf-proto";
+import type { Plane } from "./pf-proto";
 
-// Primary source: the official Project Flight tracker API.
-// It is currently returning 404 for everyone (their own tracker included), so
-// we fall back to pfreplay, then to the ATC24 mirror, and report which one is live.
+// Live sources, in priority order.
+// 1. Celesbit ATC scope backend — currently the only feed that is actually live.
+//    GET https://celesbit.dev/api/v1/traffic/live/ -> { online, captured_at, nm_per_unit, aircraft[] }
+//    Same world-unit grid (~0-400) as the PTFS navdata (airports/fixes).
+// 2. Official Project Flight tracker API (404 at the source right now).
+// 3. ATC24 open mirror (different world scale, converted below).
+const CELESBIT = "https://celesbit.dev/api/v1/traffic/live/";
 const PF = "https://api.project-flight.com";
-const PFREPLAY = "https://pfreplay.com";
 const ATC24 = "https://24data.ptfs.app";
 
 const UA = "Mozilla/5.0 (compatible; PFTracker/1.0)";
 
-export type TrafficResult = { source: "project-flight" | "pfreplay" | "atc24"; planes: Plane[] };
+export type TrafficSource = "celesbit" | "project-flight" | "atc24";
+export type TrafficResult = { source: TrafficSource; planes: Plane[]; capturedAt?: string };
+
+type CelesbitAcft = {
+  callsign: string;
+  aircraft_type: string;
+  x: number;
+  y: number;
+  altitude_ft: number;
+  groundspeed_kt: number;
+  heading_deg: number;
+  on_ground: boolean;
+};
+
+async function tryCelesbit(): Promise<{ planes: Plane[]; capturedAt?: string } | null> {
+  try {
+    const r = await fetch(CELESBIT, { headers: { Accept: "application/json", "User-Agent": UA } });
+    if (!r.ok) return null;
+    const d = (await r.json()) as { online?: boolean; captured_at?: string; aircraft?: CelesbitAcft[] };
+    const list = d.aircraft ?? [];
+    if (!list.length) return null;
+    return {
+      capturedAt: d.captured_at,
+      planes: list.map((a) => ({
+        server_id: a.on_ground ? "GND" : "AIR",
+        callsign: a.callsign ?? "",
+        roblox_username: "",
+        x: a.x,
+        y: a.y,
+        heading: a.heading_deg ?? 0,
+        altitude: a.altitude_ft ?? 0,
+        speed: a.groundspeed_kt ?? 0,
+        model: a.aircraft_type ?? "",
+        livery: "",
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function tryProjectFlight(): Promise<Plane[] | null> {
   try {
@@ -27,47 +69,23 @@ async function tryProjectFlight(): Promise<Plane[] | null> {
     const buf = new Uint8Array(await r.arrayBuffer());
     if (buf.byteLength === 0) return null;
     const planes = decodeMultiPlanes(buf);
-    return planes.length ? planes : null;
-  } catch {
-    return null;
-  }
-}
-
-type LiveAircraft = {
-  callsign: string; player: string; serverId: string;
-  x: number; y: number; heading: number; altitude: number; speed: number;
-  aircraft: string; livery: string; flightId: number;
-};
-
-async function tryPfReplay(): Promise<Plane[] | null> {
-  try {
-    const r = await fetch(`${PFREPLAY}/api/live?cid=${Math.random().toString(36).slice(2)}`, {
-      headers: { Accept: "application/json", "User-Agent": UA },
-    });
-    if (!r.ok) return null;
-    const d = (await r.json()) as { aircraft?: LiveAircraft[] };
-    const list = d.aircraft ?? [];
-    if (!list.length) return null;
-    return list.map((a) => ({
-      server_id: String(a.serverId ?? "").replace(/[{}]/g, "").slice(0, 8),
-      callsign: a.callsign ?? "",
-      roblox_username: a.player ?? "",
-      x: a.x, y: a.y,
-      heading: a.heading ?? 0,
-      altitude: a.altitude ?? 0,
-      speed: a.speed ?? 0,
-      model: a.aircraft ?? "",
-      livery: a.livery ?? "",
-      flight_id: a.flightId,
-    }));
+    // official feed uses raw studs; scale into the navdata world grid
+    return planes.length ? planes.map((p) => ({ ...p, x: p.x / 100, y: p.y / 100 })) : null;
   } catch {
     return null;
   }
 }
 
 type Acft = {
-  playerName: string; heading: number; altitude: number; speed: number; groundSpeed: number;
-  aircraftType: string; isOnGround: boolean; isEmergencyOccuring: boolean; wind: string;
+  playerName: string;
+  heading: number;
+  altitude: number;
+  speed: number;
+  groundSpeed: number;
+  aircraftType: string;
+  isOnGround: boolean;
+  isEmergencyOccuring: boolean;
+  wind: string;
   position: { x: number; y: number };
 };
 
@@ -81,8 +99,8 @@ async function tryAtc24(): Promise<Plane[]> {
     server_id: a.isEmergencyOccuring ? "EMERG" : "",
     callsign,
     roblox_username: a.playerName ?? "",
-    x: a.position?.x ?? 0,
-    y: a.position?.y ?? 0,
+    x: (a.position?.x ?? 0) / 100,
+    y: (a.position?.y ?? 0) / 100,
     heading: a.heading ?? 0,
     altitude: a.altitude ?? 0,
     speed: a.speed ?? a.groundSpeed ?? 0,
@@ -93,35 +111,10 @@ async function tryAtc24(): Promise<Plane[]> {
 
 export const fetchTraffic = createServerFn({ method: "GET" }).handler(
   async (): Promise<TrafficResult> => {
+    const cb = await tryCelesbit();
+    if (cb) return { source: "celesbit", planes: cb.planes, capturedAt: cb.capturedAt };
     const pf = await tryProjectFlight();
     if (pf) return { source: "project-flight", planes: pf };
-    const pr = await tryPfReplay();
-    if (pr) return { source: "pfreplay", planes: pr };
     return { source: "atc24", planes: await tryAtc24() };
   },
 );
-
-// Official trail endpoint, used when Project Flight is reachable.
-export const fetchUserTrail = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => {
-    const u = (d as { username?: unknown })?.username;
-    if (typeof u !== "string" || !u) throw new Error("username required");
-    return { username: u };
-  })
-  .handler(async ({ data }): Promise<{ locations: LocationData[]; touchdowns: TouchdownData[] }> => {
-    try {
-      const r = await fetch(`${PF}/v3/traffic/fetch/${encodeURIComponent(data.username)}`, {
-        headers: {
-          Accept: "application/x-protobuf, application/octet-stream, */*",
-          Origin: "https://tracker.project-flight.com",
-          Referer: "https://tracker.project-flight.com/",
-          "User-Agent": UA,
-        },
-      });
-      if (!r.ok) return { locations: [], touchdowns: [] };
-      const up = decodeUserPlane(new Uint8Array(await r.arrayBuffer()));
-      return { locations: up.locations ?? [], touchdowns: up.touchdowns ?? [] };
-    } catch {
-      return { locations: [], touchdowns: [] };
-    }
-  });
