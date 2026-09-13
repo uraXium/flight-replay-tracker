@@ -59,6 +59,7 @@ type Track = {
 function Index() {
   const [planes, setPlanes] = useState<Plane[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<TrafficSource | null>(null);
   const [query, setQuery] = useState("");
   const [phaseFilter, setPhaseFilter] = useState<"All" | Phase>("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -86,13 +87,21 @@ function Index() {
         maxZoom: 9,
         zoomControl: true,
         attributionControl: false,
-      }).setView([0, 0], 3);
+      }).setView([-270, 270], 2);
       // grid reference lines (no public PTFS tile server is online right now)
       const grid = L.layerGroup().addTo(map);
-      for (let v = -60; v <= 60; v += 10) {
-        const style = { color: "#1e293b", weight: v === 0 ? 1.5 : 0.7, opacity: 0.9 };
-        L.polyline([[v, -60], [v, 60]], style).addTo(grid);
-        L.polyline([[-60, v], [60, v]], style).addTo(grid);
+      for (let v = 0; v <= 450; v += 25) {
+        const style = { color: "#1e293b", weight: 0.7, opacity: 0.9 };
+        L.polyline([[-450, v], [0, v]], style).addTo(grid);
+        L.polyline([[-v, 0], [-v, 450]], style).addTo(grid);
+      }
+      // navdata airports for reference / alignment check
+      for (const a of (airportsData as { results: { icao: string; name: string; x: number; y: number }[] }).results) {
+        L.circleMarker(worldToLatLng(a.x, a.y), {
+          radius: 3, color: "#38bdf8", weight: 1.5, fillColor: "#0a0f1a", fillOpacity: 1,
+        })
+          .bindTooltip(`${a.icao} · ${a.name}`, { direction: "top" })
+          .addTo(grid);
       }
       mapRef.current = map;
     })();
@@ -108,8 +117,10 @@ function Index() {
     let alive = true;
     async function tick() {
       try {
-        const list = await fetchTraffic();
+        const res = await fetchTraffic();
+        const list = res.planes;
         if (!alive) return;
+        setSource(res.source);
         const now = performance.now();
         const observed = lastPollAt.current ? Math.min(8000, Math.max(1500, now - lastPollAt.current)) : 5000;
         lastPollAt.current = now;
