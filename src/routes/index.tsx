@@ -244,7 +244,7 @@ function Index() {
     const pts = [...trail.locations, { x: track.toX, y: track.toY, altitude: track.p.altitude, speed: track.p.speed }];
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1], b = pts[i];
-      if (Math.hypot(a.x - b.x, a.y - b.y) > 50000) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 50) continue;
       const avgAlt = ((a.altitude ?? 0) + (b.altitude ?? 0)) / 2;
       L.polyline([worldToLatLng(a.x, a.y), worldToLatLng(b.x, b.y)], {
         color: altColor(avgAlt),
