@@ -5,7 +5,7 @@ import type { Plane } from "./pf-proto";
 // Live sources, in priority order.
 // 1. Celesbit ATC scope backend — currently the only feed that is actually live.
 //    GET https://celesbit.dev/api/v1/traffic/live/ -> { online, captured_at, nm_per_unit, aircraft[] }
-//    Same world-unit grid (~0-400) as the PTFS navdata (airports/fixes).
+//    Same world-unit grid (~0-400) as the Project Flight navdata (airports/fixes).
 // 2. Official Project Flight tracker API (404 at the source right now).
 // 3. ATC24 open mirror (different world scale, converted below).
 const CELESBIT = "https://celesbit.dev/api/v1/traffic/live/";
