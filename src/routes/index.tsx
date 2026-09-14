@@ -8,10 +8,10 @@ import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "PTFS Live Traffic Tracker" },
-      { name: "description", content: "Live Project Flight (PTFS) traffic map with callsigns, altitude, speed and live trails." },
-      { property: "og:title", content: "PTFS Live Traffic Tracker" },
-      { property: "og:description", content: "Live Project Flight (PTFS) traffic map with callsigns, altitude, speed and live trails." },
+      { title: "Project Flight Live Traffic Tracker" },
+      { name: "description", content: "Live Project Flight traffic map with callsigns, altitude, speed and live trails." },
+      { property: "og:title", content: "Project Flight Live Traffic Tracker" },
+      { property: "og:description", content: "Live Project Flight traffic map with callsigns, altitude, speed and live trails." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -310,7 +310,7 @@ function Index() {
       `}</style>
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-sm font-semibold tracking-tight">PTFS Live Traffic</h1>
+          <h1 className="text-sm font-semibold tracking-tight">Project Flight Live Traffic</h1>
           <p className="text-[10px] text-slate-400">live source: {source ?? "connecting…"} · trails build up while the page is open</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
