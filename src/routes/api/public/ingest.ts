@@ -16,6 +16,8 @@ const AircraftSchema = z.object({
 
 const PayloadSchema = z.object({
   source: z.string().optional(),
+  bot_id: z.string().max(64).optional(),
+  bot_label: z.string().max(64).optional(),
   server_job_id: z.string().default(""),
   timestamp: z.number().optional(),
   aircraft: z.array(AircraftSchema).max(2000),
