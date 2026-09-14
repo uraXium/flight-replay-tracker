@@ -19,7 +19,7 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-// PTFS world units (same grid as navdata airports/fixes) -> simple CRS plane coords
+// Project Flight world units (same grid as navdata airports/fixes) -> simple CRS plane coords
 const worldToLatLng = (x: number, y: number): [number, number] => [-y, x];
 
 type Phase = "air" | "taxi" | "park";
@@ -88,7 +88,7 @@ function Index() {
         zoomControl: true,
         attributionControl: false,
       }).setView([-270, 270], 2);
-      // grid reference lines (no public PTFS tile server is online right now)
+      // grid reference lines (no public Project Flight tile server is online right now)
       const grid = L.layerGroup().addTo(map);
       for (let v = 0; v <= 450; v += 25) {
         const style = { color: "#1e293b", weight: 0.7, opacity: 0.9 };
