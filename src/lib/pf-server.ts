@@ -136,6 +136,38 @@ async function tryOwnScraper(): Promise<Plane[] | null> {
   }
 }
 
+export type BotStatus = {
+  bot_id: string;
+  label: string;
+  server_job_id: string;
+  aircraft_count: number;
+  last_seen: string;
+  online: boolean;
+};
+
+// Status of every bot that has reported in recently.
+export const fetchBots = createServerFn({ method: "GET" }).handler(async (): Promise<BotStatus[]> => {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("ingest_bots")
+      .select("bot_id, label, server_job_id, aircraft_count, last_seen")
+      .order("last_seen", { ascending: false });
+    if (error || !data) return [];
+    const cutoff = Date.now() - 30_000;
+    return data.map((b) => ({
+      bot_id: b.bot_id,
+      label: b.label ?? "",
+      server_job_id: b.server_job_id ?? "",
+      aircraft_count: b.aircraft_count ?? 0,
+      last_seen: b.last_seen,
+      online: new Date(b.last_seen).getTime() > cutoff,
+    }));
+  } catch {
+    return [];
+  }
+});
+
 export const fetchTraffic = createServerFn({ method: "GET" }).handler(
   async (): Promise<TrafficResult> => {
     const own = await tryOwnScraper();
