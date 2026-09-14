@@ -16,6 +16,8 @@ const AircraftSchema = z.object({
 
 const PayloadSchema = z.object({
   source: z.string().optional(),
+  bot_id: z.string().max(64).optional(),
+  bot_label: z.string().max(64).optional(),
   server_job_id: z.string().default(""),
   timestamp: z.number().optional(),
   aircraft: z.array(AircraftSchema).max(2000),
@@ -44,7 +46,9 @@ export const Route = createFileRoute("/api/public/ingest")({
 
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         const now = new Date().toISOString();
+        const botId = parsed.bot_id || parsed.server_job_id || "bot-1";
         const rows = parsed.aircraft.map((a) => ({
+          bot_id: botId,
           id: a.id,
           callsign: a.callsign,
           squawk: a.squawk,
@@ -64,13 +68,31 @@ export const Route = createFileRoute("/api/public/ingest")({
           if (error) return json({ error: error.message }, 500);
         }
 
+        // heartbeat for this bot
+        await supabaseAdmin.from("ingest_bots").upsert(
+          {
+            bot_id: botId,
+            label: parsed.bot_label ?? "",
+            server_job_id: parsed.server_job_id,
+            aircraft_count: rows.length,
+            last_seen: now,
+          },
+          { onConflict: "bot_id" },
+        );
+
         // drop aircraft that stopped reporting
         await supabaseAdmin
           .from("live_aircraft")
           .delete()
           .lt("updated_at", new Date(Date.now() - 60_000).toISOString());
 
-        return json({ ok: true, received: rows.length });
+        // drop bots that went offline for good
+        await supabaseAdmin
+          .from("ingest_bots")
+          .delete()
+          .lt("last_seen", new Date(Date.now() - 3_600_000).toISOString());
+
+        return json({ ok: true, bot_id: botId, received: rows.length });
       },
       GET: async () => json({ ok: true, hint: "POST telemetry here with the x-ingest-token header" }),
     },
