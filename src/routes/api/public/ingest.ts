@@ -46,7 +46,9 @@ export const Route = createFileRoute("/api/public/ingest")({
 
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         const now = new Date().toISOString();
+        const botId = parsed.bot_id || parsed.server_job_id || "bot-1";
         const rows = parsed.aircraft.map((a) => ({
+          bot_id: botId,
           id: a.id,
           callsign: a.callsign,
           squawk: a.squawk,
