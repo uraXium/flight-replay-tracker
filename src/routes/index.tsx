@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import planeIconUrl from "@/assets/plane.svg";
-import { fetchTraffic, type TrafficSource } from "@/lib/pf-server";
+import { fetchTraffic, fetchBots, type TrafficSource, type BotStatus } from "@/lib/pf-server";
 import airportsData from "@/lib/airports.json";
 import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
 
@@ -64,6 +64,8 @@ function Index() {
   const [phaseFilter, setPhaseFilter] = useState<"All" | Phase>("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [trail, setTrail] = useState<{ locations: LocationData[]; touchdowns: TouchdownData[] } | null>(null);
+  const [bots, setBots] = useState<BotStatus[]>([]);
+  const [showBots, setShowBots] = useState(false);
 
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);

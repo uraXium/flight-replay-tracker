@@ -12,6 +12,9 @@ local Players = game:GetService("Players")
 
 local INGEST_URL = "https://project--228eed25-363a-4814-b40a-4d1c1ac3c51e-dev.lovable.app/api/public/ingest"
 local INGEST_TOKEN = "PASTE_YOUR_TOKEN_HERE"
+-- Give every bot machine a different name so the app can tell them apart.
+local BOT_ID = "bot-1"
+local BOT_LABEL = "Main PC"
 local REFRESH_RATE = 1.0
 
 local STUDS_TO_FEET = 0.92
@@ -110,6 +113,8 @@ task.spawn(function()
         if #planes > 0 then
             local payload = {
                 source = "roblox_client",
+                bot_id = BOT_ID,
+                bot_label = BOT_LABEL,
                 server_job_id = game.JobId or "standalone",
                 timestamp = os.time(),
                 aircraft = planes,
