@@ -14,10 +14,35 @@ export type Database = {
   }
   public: {
     Tables: {
+      ingest_bots: {
+        Row: {
+          aircraft_count: number
+          bot_id: string
+          label: string
+          last_seen: string
+          server_job_id: string
+        }
+        Insert: {
+          aircraft_count?: number
+          bot_id: string
+          label?: string
+          last_seen?: string
+          server_job_id?: string
+        }
+        Update: {
+          aircraft_count?: number
+          bot_id?: string
+          label?: string
+          last_seen?: string
+          server_job_id?: string
+        }
+        Relationships: []
+      }
       live_aircraft: {
         Row: {
           aircraft_type: string
           altitude: number
+          bot_id: string
           callsign: string
           heading: number
           id: string
@@ -32,6 +57,7 @@ export type Database = {
         Insert: {
           aircraft_type?: string
           altitude?: number
+          bot_id?: string
           callsign?: string
           heading?: number
           id: string
@@ -46,6 +72,7 @@ export type Database = {
         Update: {
           aircraft_type?: string
           altitude?: number
+          bot_id?: string
           callsign?: string
           heading?: number
           id?: string
