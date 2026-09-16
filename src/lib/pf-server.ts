@@ -95,10 +95,8 @@ export const fetchTraffic = createServerFn({ method: "GET" }).handler(
   async (): Promise<TrafficResult> => {
     const own = await tryOwnScraper();
     if (own) return { source: "own-scraper", planes: own };
-    const cb = await tryCelesbit();
-    if (cb) return { source: "celesbit", planes: cb.planes, capturedAt: cb.capturedAt };
     const pf = await tryProjectFlight();
     if (pf) return { source: "project-flight", planes: pf };
-    return { source: "atc24", planes: await tryAtc24() };
+    return { source: "none", planes: [] };
   },
 );
