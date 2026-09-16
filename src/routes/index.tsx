@@ -198,6 +198,20 @@ function Index() {
     return () => { alive = false; clearInterval(iv); };
   }, []);
 
+  // Poll bot heartbeats
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const b = await fetchBots();
+        if (alive) setBots(b);
+      } catch { /* ignore */ }
+    };
+    tick();
+    const iv = setInterval(tick, 10000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+
   // rAF animation
   useEffect(() => {
     let raf = 0;
@@ -313,7 +327,16 @@ function Index() {
       <header className="border-b border-white/5 px-4 py-2 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-sm font-semibold tracking-tight">Project Flight Live Traffic</h1>
-          <p className="text-[10px] text-slate-400">live source: {source ?? "connecting…"} · trails build up while the page is open</p>
+          <p className="text-[10px] text-slate-400">
+            {source === "own-scraper"
+              ? "live from your own Project Flight bots"
+              : source === "project-flight"
+                ? "live from the official Project Flight tracker"
+                : source === "none"
+                  ? "no Project Flight data right now — start a bot to feed the map"
+                  : "connecting…"}
+            {" · trails build up while the page is open"}
+          </p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#fbbf24]" />{counts.air} air</span>
@@ -323,8 +346,40 @@ function Index() {
             <span className="size-2 rounded-full bg-sky-400 animate-pulse" />
             {planes.length} planes
           </span>
+          <button
+            onClick={() => setShowBots((v) => !v)}
+            className="ml-2 rounded border border-white/10 px-2 py-1 text-[11px] hover:bg-white/5"
+          >
+            Bots {bots.filter((b) => b.online).length}/{bots.length}
+          </button>
         </div>
       </header>
+
+      {showBots && (
+        <div className="mx-3 mt-2 rounded border border-white/10 bg-[#0a0f1a] p-2 text-[11px] flex-shrink-0">
+          {bots.length === 0 ? (
+            <div className="text-slate-400">
+              No bots have reported yet. Run the scraper script on a Windows machine while you sit in a Project Flight server.
+            </div>
+          ) : (
+            <table className="w-full">
+              <tbody>
+                {bots.map((b) => (
+                  <tr key={b.bot_id} className="border-b border-white/5 last:border-0">
+                    <td className="py-1">
+                      <span className={`inline-block size-2 rounded-full mr-2 ${b.online ? "bg-emerald-400" : "bg-slate-600"}`} />
+                      <span className="text-slate-100">{b.label || b.bot_id}</span>
+                    </td>
+                    <td className="py-1 font-mono text-slate-500 truncate max-w-[220px]">{b.server_job_id || "—"}</td>
+                    <td className="py-1 text-right text-slate-300 tabular-nums">{b.aircraft_count} aircraft</td>
+                    <td className="py-1 text-right text-slate-500">{new Date(b.last_seen).toLocaleTimeString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="mx-3 mt-2 rounded border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-300 flex-shrink-0">{error}</div>
