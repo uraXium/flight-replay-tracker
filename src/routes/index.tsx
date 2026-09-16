@@ -198,6 +198,20 @@ function Index() {
     return () => { alive = false; clearInterval(iv); };
   }, []);
 
+  // Poll bot heartbeats
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const b = await fetchBots();
+        if (alive) setBots(b);
+      } catch { /* ignore */ }
+    };
+    tick();
+    const iv = setInterval(tick, 10000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+
   // rAF animation
   useEffect(() => {
     let raf = 0;
