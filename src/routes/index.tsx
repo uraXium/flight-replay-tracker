@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import planeIconUrl from "@/assets/plane.svg";
+import worldMapUrl from "@/assets/pf-map.svg";
 import { fetchTraffic, fetchBots, type TrafficSource, type BotStatus } from "@/lib/pf-server";
 import airportsData from "@/lib/airports.json";
 import type { Plane, LocationData, TouchdownData } from "@/lib/pf-proto";
@@ -90,7 +91,10 @@ function Index() {
         zoomControl: true,
         attributionControl: false,
       }).setView([-270, 270], 2);
-      // grid reference lines (no public Project Flight tile server is online right now)
+      // Project Flight world map artwork (tweak MAP_BOUNDS if it drifts off the airports)
+      L.imageOverlay(worldMapUrl, MAP_BOUNDS, { opacity: 0.75, interactive: false }).addTo(map);
+
+      // grid reference lines
       const grid = L.layerGroup().addTo(map);
       for (let v = 0; v <= 450; v += 25) {
         const style = { color: "#1e293b", weight: 0.7, opacity: 0.9 };
