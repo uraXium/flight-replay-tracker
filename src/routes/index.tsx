@@ -23,6 +23,9 @@ export const Route = createFileRoute("/")({
 // Project Flight world units (same grid as navdata airports/fixes) -> simple CRS plane coords
 const worldToLatLng = (x: number, y: number): [number, number] => [-y, x];
 
+// Map artwork extent in world units: [[south, west], [north, east]]
+const MAP_BOUNDS: [[number, number], [number, number]] = [[-450, 0], [0, 450]];
+
 type Phase = "air" | "taxi" | "park";
 const derivePhase = (alt: number, spd: number): Phase => {
   if (alt > 200 || spd > 60) return "air";
